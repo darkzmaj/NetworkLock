@@ -67,7 +67,7 @@ public final class Commands {
             case "stats" -> s.lines(t.stats());
             case "proxies" -> s.lines(t.proxies());
             case "doctor" -> s.lines(t.doctor());
-            case "version" -> s.lines(List.of("NetworkLock " + t.version()));
+            case "version" -> s.lines(List.of("NetworkLock " + t.version() + " by DarkZmaj", "Support: https://kori.my"));
             case "reload" -> {
                 List<String> problems = t.reload();
                 if (problems.isEmpty()) {

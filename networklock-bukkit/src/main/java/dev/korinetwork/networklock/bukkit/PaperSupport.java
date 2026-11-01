@@ -17,7 +17,7 @@ final class PaperSupport {
             profile.getMethod("removeProperty", String.class);
             return null;
         } catch (ReflectiveOperationException | LinkageError e) {
-            return "this server lacks the Paper profile API; use Paper, Folia, Purpur or Pufferfish (plain Spigot is not supported)";
+            return "this server lacks the Paper profile API; use Paper, Folia, Purpur or Pufferfish (plain Spigot and CraftBukkit are not supported)";
         }
     }
 

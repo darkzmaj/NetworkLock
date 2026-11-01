@@ -11,7 +11,7 @@ You put the **same `NetworkLock.jar`** on your proxies and your game servers, an
 
 ## Works on
 
-Velocity, BungeeCord and Waterfall (proxies), and Paper, Folia, Purpur and Pufferfish (game servers). Java 21 or newer. Plain Spigot is not supported. See the [compatibility matrix](docs/COMPATIBILITY.md) for exact tested versions.
+Velocity, BungeeCord and Waterfall (proxies), and Paper, Folia, Purpur and Pufferfish (game servers). Java 21 or newer. Plain Spigot, CraftBukkit and Sponge are not supported. See the [compatibility matrix](docs/COMPATIBILITY.md) for exact tested versions.
 
 ## Setup
 
@@ -64,6 +64,10 @@ it/run-integration.sh        # optional: tests against real Paper, Velocity and 
 
 Dependency versions are pinned in `gradle.lockfile` files. After changing a dependency, refresh them with `./gradlew dependencies :networklock-core:dependencies :networklock-bukkit:dependencies :networklock-velocity:dependencies :networklock-bungee:dependencies --write-locks`.
 
+## Support
+
+Questions or problems: https://kori.my
+
 ## License
 
-MIT, see [LICENSE](LICENSE). NetworkLock bundles SnakeYAML (Apache 2.0), see [THIRD-PARTY-NOTICES.txt](THIRD-PARTY-NOTICES.txt).
+MIT, made by DarkZmaj. See [LICENSE](LICENSE). NetworkLock bundles SnakeYAML (Apache 2.0), see [THIRD-PARTY-NOTICES.txt](THIRD-PARTY-NOTICES.txt).

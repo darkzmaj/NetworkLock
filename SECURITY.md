@@ -1,6 +1,6 @@
 # Security
 
-Found a way around NetworkLock? Please report it privately on GitHub (Security tab, "Report a vulnerability") instead of opening a public issue.
+Found a way around NetworkLock? Please report it privately on GitHub (Security tab, "Report a vulnerability") instead of opening a public issue, or contact us through https://kori.my.
 
 Include the NetworkLock version, your server and proxy versions, your config with the keys removed, and steps to reproduce it. You should get a reply within 3 days.
 

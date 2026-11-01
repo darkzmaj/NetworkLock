@@ -31,6 +31,9 @@ A test client connects straight to the game server, as an attacker would, and tr
 | Purpur 1.21.11 | refused | refused | refused | accepted, then refused | yes |
 | Pufferfish 1.21.10 | refused | refused | refused | accepted, then refused | yes |
 | Spigot 1.21.11 | refused | refused | refused | refused (no Paper API, by design) | n/a |
+| CraftBukkit 1.21.11 | refused | refused | refused | refused (no Paper API, by design) | n/a |
+
+SpongeVanilla 1.21.11 was also tried: it ignores the jar ("unknown resource ... will be ignored"), so NetworkLock does not run there.
 
 ## Full network checks (`it/run-integration.sh`)
 

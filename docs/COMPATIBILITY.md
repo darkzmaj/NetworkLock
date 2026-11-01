@@ -12,8 +12,10 @@ Every server below was tested with the same `NetworkLock.jar` (1.0.0). Server ja
 | Purpur | 1.21.11 (build 2568) | 21 | Works. |
 | Pufferfish | 1.21.10 (build 39) | 21 | Works. |
 | Spigot | 1.21.11 (BuildTools) | 21 | Not supported. NetworkLock loads, says why in the console, and lets nobody join. |
+| CraftBukkit | 1.21.11 (BuildTools) | 21 | Not supported. Same as Spigot: lets nobody join. |
+| SpongeVanilla | 1.21.11 (18.0.0-RC2761) | 21 | Not supported. Sponge ignores the jar, so the server runs **without** protection. |
 
-Spigot is missing the Paper API that NetworkLock uses to check players before they join, so it locks the server rather than running without protection.
+Spigot and CraftBukkit are missing the Paper API that NetworkLock uses to check players before they join, so it locks the server rather than running without protection. Sponge uses a different plugin system and does not load NetworkLock at all.
 
 ## Proxies
 

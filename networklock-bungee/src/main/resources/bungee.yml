@@ -1,5 +1,5 @@
 name: NetworkLock
 main: dev.korinetwork.networklock.bungee.NetworkLockBungee
 version: "${version}"
-author: NetworkLock contributors
+author: DarkZmaj
 description: Makes players join your servers only through your proxy.
