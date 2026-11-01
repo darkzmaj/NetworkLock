@@ -1,75 +1,82 @@
 # NetworkLock
 
-**NetworkLock makes sure players can only join your Minecraft servers through your proxy.**
+**Players can only join your servers through your proxy. Nobody gets around it.**
 
-On a network, players connect to a proxy (Velocity or BungeeCord), and the proxy sends them on to your game servers. If someone finds a game server's address, they can try to connect to it directly and pretend to be any player, including an admin. NetworkLock blocks that.
+If someone finds the address of one of your game servers, they can connect to it directly and log in as any player, admins included. NetworkLock stops that.
 
-- The proxy stamps every player it sends with a secret signature that only works once, for that one player, for that one server, for 30 seconds.
-- The game server lets a player in only if the stamp is valid. Everyone else is turned away before they even load in.
+Your proxy gives every player a one-time pass that only works for that player, on that server, for 30 seconds. The server checks the pass before the player even loads in. No valid pass, no entry.
 
-You put the **same `NetworkLock.jar`** on your proxies and your game servers, and it works out where it is running.
+[![discord](https://cdn.modrinth.com/data/cached_images/c97c06e73051a5a1a196babde1652b0cac4b09f4.png)](https://discord.com/invite/4NF45wy2F2)
 
-## Works on
+## Features
 
-Velocity, BungeeCord and Waterfall (proxies), and Paper, Folia, Purpur, Pufferfish and Sponge (game servers), Minecraft 1.21 to 26.3. Java 21 or newer. Plain Spigot and CraftBukkit are not supported. See the [compatibility matrix](docs/COMPATIBILITY.md) for exact tested versions.
+- **One jar for everything.** Put the same `NetworkLock.jar` on your proxy and on every server.
+- **Blocks proxy bypass.** Direct connections are refused before the player joins.
+- **Blocks fake players.** Nobody can log in with someone else's name or UUID.
+- **Passes can't be reused.** Each one works once, on one server, for 30 seconds.
+- **Several proxies.** Each proxy has its own key. If one leaks, remove just that one.
+- **Login limit.** Too many logins from one IP get blocked for a while.
+- **Your messages.** Every message players see is set on the proxy, with `&` colour codes.
+- **Safe by default.** If the config is broken, the server lets nobody in instead of running unprotected.
+- **No database, no extra plugins.**
 
 ## Setup
 
-1. **On the proxy:** drop `NetworkLock.jar` into `plugins/` and start it once. NetworkLock creates your secret key in `plugins/NetworkLock/config.yml` (on Velocity: `plugins/networklock/config.yml`) under `security.key`. That's the key you copy to your servers in step 3. Give each proxy its own `network.id`.
-2. **Turn on player forwarding:** in `velocity.toml` set `player-info-forwarding-mode = "modern"`, or on BungeeCord set `ip_forward: true`.
-3. **On each game server:** turn on the matching forwarding in Paper (`proxies.velocity` in `config/paper-global.yml`, **or** `settings.bungeecord: true` in `spigot.yml`, but not both). Drop in `NetworkLock.jar`, start once, then edit `plugins/NetworkLock/config.yml`:
+1. Put `NetworkLock.jar` in your proxy's `plugins` folder and start it once.
+2. Open the proxy's `plugins/NetworkLock/config.yml` (on Velocity: `plugins/networklock/config.yml`) and copy the `key`.
+3. Turn on player forwarding on the proxy (`modern` on Velocity, `ip_forward: true` on BungeeCord) and the matching setting on your game servers.
+4. Put `NetworkLock.jar` on each server, start it once, and fill in `plugins/NetworkLock/config.yml`:
 
-   ```yaml
-   network:
-     server-id: "lobby"            # this server's name in your proxy config
-   authentication:
-     trusted-proxies:
-       - id: "proxy-1"             # the proxy's network.id
-         keys: ["<the proxy's key>"]
-   ```
+```yaml
+network:
+  server-id: "lobby"        # the server's name in your proxy config
 
-4. Run `/networklock reload`, then `/networklock doctor` to check for problems.
+authentication:
+  trusted-proxies:
+    - id: "proxy-1"
+      keys: ["paste the proxy key here"]
+```
 
-On Sponge, put the jar in `mods/` instead, edit `config/networklock/config.yml`, and turn on forwarding in `config/sponge/sponge.conf`.
+5. Run `/networklock reload`, then `/networklock doctor` to check everything.
 
-Until a game server is configured, it lets nobody in. That is on purpose: it never runs unprotected.
+On Sponge, use the `mods` folder and `config/networklock/config.yml`, and turn on `ip-forwarding` in `config/sponge/sponge.conf`.
 
 ## Commands
 
-`/networklock` (or `/nlock`): `help`, `status`, `reload`, `doctor`, `stats`, `proxies`, `version`. Each needs `networklock.command.<name>`, or `networklock.admin` for all of them. Keys are never shown, only a short fingerprint so you can check that proxy and server match.
+| Command | What it does |
+|---|---|
+| `/networklock status` | Shows if protection is active |
+| `/networklock reload` | Reloads the config (only if it's valid) |
+| `/networklock doctor` | Finds setup mistakes |
+| `/networklock stats` | Shows allowed and blocked logins |
+| `/networklock proxies` | Shows key fingerprints to compare proxy and server |
+| `/networklock version` | Shows the version |
 
-## Also included
+Alias: `/nlock`. Permission: `networklock.admin` for everything, or `networklock.command.<name>` for each command.
 
-- Limits on how fast one address can try to log in, with short temporary blocks for spammers.
-- Customisable player messages in `messages.yml` (proxy only), with `&a`-style colour codes (MiniMessage also works).
-- Several proxies with their own keys, and key changes without downtime.
+## Supported versions
+
+| Platform | Versions |
+|---|---|
+| Paper, Folia, Purpur, Pufferfish | Minecraft 1.21 to 26.3 |
+| Sponge | Minecraft 1.21.10 to 26.3 |
+| Velocity | 3.5 and newer, including 4.x |
+| BungeeCord, Waterfall | 1.21 |
+
+Players can join with any Minecraft version your proxy accepts. Needs Java 21 or newer (Java 25 for Minecraft 26.x).
+
+**Plain Spigot and CraftBukkit are not supported**, because they are missing the Paper API that NetworkLock needs. On them it locks the server instead of running without protection.
 
 ## Good to know
 
-- It is not DDoS protection.
-- Still firewall your game servers so only your proxies can reach them.
-- If someone steals a proxy's key, remove that key from your servers and reload.
-
-## More detail
-
-- [Configuration and key rotation](docs/CONFIGURATION.md)
-- [How the security works](docs/THREAT-MODEL.md)
-- [Test results](docs/TEST-REPORT.md)
-- [Security policy](SECURITY.md) · [Changelog](CHANGELOG.md)
-
-## Building
-
-```bash
-./gradlew test shadowJar     # needs JDK 21; output: build/libs/NetworkLock.jar
-it/run-integration.sh        # optional: tests against real Paper, Velocity and Waterfall servers
-```
-
-Dependency versions are pinned in `gradle.lockfile` files. After changing a dependency, refresh them with `./gradlew dependencies :networklock-core:dependencies :networklock-bukkit:dependencies :networklock-velocity:dependencies :networklock-bungee:dependencies --write-locks`.
+- This is not DDoS protection.
+- Still firewall your servers so only your proxies can reach them. NetworkLock is the lock behind that.
+- If a proxy key leaks, remove it from your servers and run `/networklock reload`.
 
 ## Support
 
-Questions or problems: https://kori.my
+Questions or problems? Get help at **https://kori.my**
 
 ## License
 
-MIT, made by DarkZmaj. See [LICENSE](LICENSE). NetworkLock bundles SnakeYAML (Apache 2.0), see [THIRD-PARTY-NOTICES.txt](THIRD-PARTY-NOTICES.txt).
+Open source under the MIT license.
