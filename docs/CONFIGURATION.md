@@ -2,7 +2,7 @@
 
 NetworkLock uses two files:
 
-- `config.yml` on every server and proxy
+- `config.yml` on every server and proxy (on Sponge: `config/networklock/config.yml`)
 - `messages.yml` on proxies only
 
 The default files only contain the settings most people change. Everything else is listed below; add a line to the file if you want to change it. A reload checks the whole file first and only applies it if everything is valid.

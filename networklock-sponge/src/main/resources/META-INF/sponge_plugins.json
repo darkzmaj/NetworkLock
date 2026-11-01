@@ -1,0 +1,22 @@
+{
+  "loader": { "name": "java_plain", "version": "1.0" },
+  "license": "MIT",
+  "global": {
+    "version": "${version}",
+    "links": {
+      "homepage": "https://kori.my",
+      "source": "https://github.com/darkzmaj/NetworkLock",
+      "issues": "https://github.com/darkzmaj/NetworkLock/issues"
+    },
+    "contributors": [ { "name": "DarkZmaj", "description": "Author" } ],
+    "dependencies": [ { "id": "spongeapi", "version": "17.0.0", "load-order": "after", "optional": false } ]
+  },
+  "plugins": [
+    {
+      "id": "networklock",
+      "name": "NetworkLock",
+      "entrypoint": "dev.korinetwork.networklock.sponge.NetworkLockSponge",
+      "description": "Makes players join your servers only through your proxy."
+    }
+  ]
+}

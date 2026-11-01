@@ -147,7 +147,15 @@ public final class Probe {
                             final int t = threshold;
                             send(out, packet(0x03, buf -> {}), t); // login acknowledged
                         }
-                        default -> { /* login plugin requests etc. are not expected from these servers */ }
+                        case 0x04 -> { // login plugin request (Sponge sends these): answer "not understood", like vanilla
+                            int messageId = readVarInt(pin);
+                            final int t = threshold;
+                            send(out, packet(0x02, buf -> {
+                                varInt(buf, messageId);
+                                buf.writeBoolean(false);
+                            }), t);
+                        }
+                        default -> { /* nothing else is expected during login */ }
                     }
                 } else {
                     if (id == 0x02) return "REJECTED (configuration) " + printable(p);

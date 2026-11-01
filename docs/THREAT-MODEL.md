@@ -21,7 +21,7 @@ The game server checks, in this order:
 4. It is less than 30 seconds old.
 5. Its nonce has not been used before on this server.
 
-This happens in `AsyncPlayerPreLoginEvent`, before the player exists on the server. If any check fails, the player is refused. After a successful check the signature is removed from the player's profile, so other plugins and players never see it.
+This happens before the player exists on the server (`AsyncPlayerPreLoginEvent` on Paper, `ServerSideConnectionEvent.Auth` on Sponge). If any check fails, the player is refused. On Paper the signature is then removed from the player's profile. Sponge does not allow that, so there the used signature stays in the profile, where it is worthless because it cannot be used again.
 
 Keys are 32 random bytes and never leave the config files. Only the signatures travel over the network. Each proxy has its own key.
 

@@ -33,7 +33,8 @@ A test client connects straight to the game server, as an attacker would, and tr
 | Spigot 1.21.11 | refused | refused | refused | refused (no Paper API, by design) | n/a |
 | CraftBukkit 1.21.11 | refused | refused | refused | refused (no Paper API, by design) | n/a |
 
-SpongeVanilla 1.21.11 was also tried: it ignores the jar ("unknown resource ... will be ignored"), so NetworkLock does not run there.
+| SpongeVanilla 1.21.11 | refused | refused | refused | accepted, then refused | not possible on Sponge (harmless) |
+| SpongeVanilla 26.3 (Java 25) | refused | refused | refused | accepted, then refused | not possible on Sponge (harmless) |
 
 ## Full network checks (`it/run-integration.sh`)
 
@@ -48,6 +49,7 @@ Real Paper or Folia, Velocity and Waterfall running together. 15 checks: the att
 
 - Velocity 3.5.1 with `modern` forwarding in front of Paper 1.21.11: works.
 - Velocity 4.3.1 in front of Paper 26.3, both on Java 25: works.
+- Velocity 3.5.1 in front of SpongeVanilla 1.21.11, with Sponge `MODERN` and with Sponge `LEGACY` forwarding: both work, and direct connections to Sponge are refused.
 - BungeeCord: works. Login limit tested: 3 logins allowed, the 4th refused with the limit message, then a temporary block.
 - One game server trusting three proxies, each with its own key: all three work.
 - 48 players logging in at the same moment, each followed by a replay attempt: 48 accepted, 48 replays refused.

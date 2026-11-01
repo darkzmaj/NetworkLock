@@ -11,7 +11,7 @@ You put the **same `NetworkLock.jar`** on your proxies and your game servers, an
 
 ## Works on
 
-Velocity, BungeeCord and Waterfall (proxies), and Paper, Folia, Purpur and Pufferfish (game servers). Java 21 or newer. Plain Spigot, CraftBukkit and Sponge are not supported. See the [compatibility matrix](docs/COMPATIBILITY.md) for exact tested versions.
+Velocity, BungeeCord and Waterfall (proxies), and Paper, Folia, Purpur, Pufferfish and Sponge (game servers), Minecraft 1.21 to 26.3. Java 21 or newer. Plain Spigot and CraftBukkit are not supported. See the [compatibility matrix](docs/COMPATIBILITY.md) for exact tested versions.
 
 ## Setup
 
@@ -29,6 +29,8 @@ Velocity, BungeeCord and Waterfall (proxies), and Paper, Folia, Purpur and Puffe
    ```
 
 4. Run `/networklock reload`, then `/networklock doctor` to check for problems.
+
+On Sponge, put the jar in `mods/` instead, edit `config/networklock/config.yml`, and turn on forwarding in `config/sponge/sponge.conf`.
 
 Until a game server is configured, it lets nobody in. That is on purpose: it never runs unprotected.
 

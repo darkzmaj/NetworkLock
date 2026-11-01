@@ -24,7 +24,7 @@ subprojects {
     tasks.withType<ProcessResources> {
         val v = project.version.toString()
         inputs.property("version", v)
-        filesMatching(listOf("plugin.yml", "bungee.yml", "velocity-plugin.json")) {
+        filesMatching(listOf("plugin.yml", "bungee.yml", "velocity-plugin.json", "META-INF/sponge_plugins.json")) {
             expand("version" to v)
         }
     }
@@ -45,6 +45,7 @@ dependencies {
     implementation(project(":networklock-bukkit"))
     implementation(project(":networklock-velocity"))
     implementation(project(":networklock-bungee"))
+    implementation(project(":networklock-sponge"))
 }
 
 tasks.shadowJar {
