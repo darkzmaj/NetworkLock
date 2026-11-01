@@ -1,0 +1,42 @@
+name: NetworkLock
+main: dev.korinetwork.networklock.bukkit.NetworkLockBukkit
+version: "${version}"
+api-version: "1.21"
+load: STARTUP
+folia-supported: true
+description: Proxy-to-backend login authentication and connection protection.
+website: https://github.com/darkzmaj/NetworkLock
+authors: [NetworkLock contributors]
+
+commands:
+  networklock:
+    description: NetworkLock administration.
+    usage: /<command> [help|status|reload|doctor|stats|proxies|version]
+    aliases: [nlock]
+
+permissions:
+  networklock.admin:
+    description: All NetworkLock commands.
+    default: op
+    children:
+      networklock.command.help: true
+      networklock.command.status: true
+      networklock.command.reload: true
+      networklock.command.doctor: true
+      networklock.command.stats: true
+      networklock.command.proxies: true
+      networklock.command.version: true
+  networklock.command.help:
+    default: op
+  networklock.command.status:
+    default: op
+  networklock.command.reload:
+    default: op
+  networklock.command.doctor:
+    default: op
+  networklock.command.stats:
+    default: op
+  networklock.command.proxies:
+    default: op
+  networklock.command.version:
+    default: op

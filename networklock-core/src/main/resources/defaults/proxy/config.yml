@@ -1,0 +1,22 @@
+# NetworkLock - proxy
+
+network:
+  id: "proxy-1"            # unique name for this proxy
+
+security:
+  # Your key. It is created here automatically on first start.
+  # Copy it into trusted-proxies on every server. Keep it private.
+  key: ""
+
+protection:
+  connection-limit:
+    enabled: true
+    max-attempts: 10       # logins per IP...
+    window-seconds: 10     # ...within this many seconds
+  temporary-blocks:
+    enabled: true
+    duration-seconds: 60
+  exempt: []               # IPs never limited, e.g. ["10.0.0.0/8"]
+
+logging:
+  debug: false

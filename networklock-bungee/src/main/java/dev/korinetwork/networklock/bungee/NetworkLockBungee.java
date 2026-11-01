@@ -1,0 +1,192 @@
+package dev.korinetwork.networklock.bungee;
+
+import dev.korinetwork.networklock.core.Addresses;
+import dev.korinetwork.networklock.core.Commands;
+import dev.korinetwork.networklock.core.ForwardingToken;
+import dev.korinetwork.networklock.core.JulLog;
+import dev.korinetwork.networklock.core.MiniText;
+import dev.korinetwork.networklock.core.PlayerIdentity;
+import dev.korinetwork.networklock.core.ProxyCore;
+import net.md_5.bungee.api.CommandSender;
+import net.md_5.bungee.api.chat.BaseComponent;
+import net.md_5.bungee.api.chat.TextComponent;
+import net.md_5.bungee.api.connection.ProxiedPlayer;
+import net.md_5.bungee.api.event.LoginEvent;
+import net.md_5.bungee.api.event.PreLoginEvent;
+import net.md_5.bungee.api.event.ServerConnectEvent;
+import net.md_5.bungee.api.event.ServerConnectedEvent;
+import net.md_5.bungee.api.event.ServerKickEvent;
+import net.md_5.bungee.api.plugin.Command;
+import net.md_5.bungee.api.plugin.Listener;
+import net.md_5.bungee.api.plugin.Plugin;
+import net.md_5.bungee.api.plugin.TabExecutor;
+import net.md_5.bungee.event.EventHandler;
+import net.md_5.bungee.event.EventPriority;
+
+import java.net.InetSocketAddress;
+import java.util.ArrayList;
+import java.util.List;
+
+/** BungeeCord / Waterfall / FlameCord entry point, declared in {@code bungee.yml}. */
+public final class NetworkLockBungee extends Plugin implements Listener {
+
+    private ProxyCore core;
+    private BungeeProfiles profiles;
+
+    @Override
+    public void onEnable() {
+        core = new ProxyCore(getDataFolder().toPath(), new JulLog(getLogger()), System::currentTimeMillis, System.getenv());
+        core.start();
+        try {
+            profiles = new BungeeProfiles();
+        } catch (ReflectiveOperationException | RuntimeException e) {
+            getLogger().severe("This proxy build is not supported (" + e + "). Connections cannot be signed,"
+                    + " so backends will reject every player.");
+        }
+        getProxy().getPluginManager().registerListener(this, this);
+        getProxy().getPluginManager().registerCommand(this, new NetworkLockCommand());
+        for (String line : doctor()) {
+            if (!line.startsWith("OK")) getLogger().warning("doctor: " + line);
+        }
+    }
+
+    @EventHandler(priority = EventPriority.LOWEST)
+    public void onPreLogin(PreLoginEvent e) {
+        if (e.isCancelled()) return;
+        if (!(e.getConnection().getSocketAddress() instanceof InetSocketAddress address)) return;
+        String key = switch (core.admit(address.getAddress())) {
+            case ALLOWED -> null;
+            case LIMITED -> "connection-limited";
+            case BLOCKED -> "temporarily-blocked";
+            case LOCKDOWN -> "security-error";
+        };
+        if (key != null) {
+            e.setReason(render(key));
+            e.setCancelled(true);
+        }
+    }
+
+    @EventHandler(priority = EventPriority.LOWEST)
+    public void onLogin(LoginEvent e) {
+        if (core.inLockdown() || profiles == null) {
+            e.setReason(render("security-error"));
+            e.setCancelled(true);
+        }
+    }
+
+    /** HIGHEST runs last on BungeeCord, so the signed profile is the one that is actually sent. */
+    @EventHandler(priority = EventPriority.HIGHEST)
+    public void onServerConnect(ServerConnectEvent e) {
+        if (e.isCancelled() || profiles == null) return;
+        ProxiedPlayer player = e.getPlayer();
+        try {
+            List<PlayerIdentity.Property> others = withoutToken(profiles.read(player.getPendingConnection()));
+            PlayerIdentity identity = new PlayerIdentity(player.getUniqueId(), player.getName(),
+                    Addresses.normalize(player.getSocketAddress()), others);
+            String token = core.mint(identity, e.getTarget().getName());
+            if (token == null) return;
+            List<PlayerIdentity.Property> signed = new ArrayList<>(others);
+            signed.add(new PlayerIdentity.Property(ForwardingToken.PROPERTY, token, ""));
+            profiles.write(player.getPendingConnection(), player.getUniqueId(), player.getName(), signed);
+        } catch (ReflectiveOperationException | RuntimeException ex) {
+            getLogger().severe("Could not sign the connection of " + player.getName() + " (backend will refuse it): " + ex);
+        }
+    }
+
+    /** Drop the single-use credential once the backend accepted it, so nothing else relays it. */
+    @EventHandler(priority = EventPriority.HIGHEST)
+    public void onServerConnected(ServerConnectedEvent e) {
+        stripToken(e.getPlayer());
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST)
+    public void onKick(ServerKickEvent e) {
+        stripToken(e.getPlayer());
+        String reason = e.getReason() == null ? null : e.getReason().toPlainText();
+        String replacement = core.translateBackendKick(reason);
+        if (replacement != null) e.setReason(renderMini(replacement));
+    }
+
+    private void stripToken(ProxiedPlayer player) {
+        if (profiles == null) return;
+        try {
+            List<PlayerIdentity.Property> props = profiles.read(player.getPendingConnection());
+            List<PlayerIdentity.Property> kept = withoutToken(props);
+            if (kept.size() != props.size()) profiles.write(player.getPendingConnection(), player.getUniqueId(), player.getName(), kept);
+        } catch (ReflectiveOperationException | RuntimeException ignored) {
+            // the next connection overwrites the stale credential anyway; a replay of it is rejected
+        }
+    }
+
+    private static List<PlayerIdentity.Property> withoutToken(List<PlayerIdentity.Property> props) {
+        List<PlayerIdentity.Property> out = new ArrayList<>(props.size());
+        for (PlayerIdentity.Property p : props) {
+            if (!ForwardingToken.PROPERTY.equals(p.name())) out.add(p);
+        }
+        return out;
+    }
+
+    private BaseComponent render(String key) {
+        return renderMini(core.messages().get(key));
+    }
+
+    private static BaseComponent renderMini(String mini) {
+        return TextComponent.fromLegacy(MiniText.anyToLegacy(mini));
+    }
+
+    @SuppressWarnings("deprecation") // isIpForward has no replacement in the API
+    private List<String> doctor() {
+        List<String> out = new ArrayList<>(core.doctorLines());
+        if (profiles == null) out.add("FAIL proxy internals not recognised; connections are not being signed");
+        if (getProxy().getConfig().isIpForward()) {
+            out.add("OK   ip_forward is enabled");
+        } else {
+            out.add("FAIL ip_forward is false in BungeeCord's config.yml; backends cannot verify players");
+        }
+        return out;
+    }
+
+    private final class NetworkLockCommand extends Command implements TabExecutor {
+        NetworkLockCommand() {
+            super("networklock", null, "nlock");
+        }
+
+        @Override
+        public void execute(CommandSender sender, String[] args) {
+            Commands.dispatch(args, sender(sender), new Commands.Target() {
+                public List<String> status() {
+                    List<String> l = new ArrayList<>(core.statusLines());
+                    l.add("Platform: " + getProxy().getName() + " " + getProxy().getVersion());
+                    return l;
+                }
+                public List<String> stats() { return core.statsLines(); }
+                public List<String> proxies() { return core.proxiesLines(); }
+                public List<String> doctor() { return NetworkLockBungee.this.doctor(); }
+                public List<String> reload() { return core.reload(); }
+                public String version() { return getDescription().getVersion(); }
+            });
+        }
+
+        @Override
+        public Iterable<String> onTabComplete(CommandSender sender, String[] args) {
+            return Commands.complete(args, sender(sender));
+        }
+
+        private Commands.Sender sender(CommandSender s) {
+            return new Commands.Sender() {
+                public boolean hasPermission(String node) {
+                    return s.hasPermission(node);
+                }
+
+                public void message(String key) {
+                    s.sendMessage(renderMini(core.messages().prefixed(key)));
+                }
+
+                public void lines(List<String> lines) {
+                    String prefix = MiniText.anyToLegacy(core.messages().get("prefix"));
+                    for (String l : lines) s.sendMessage(TextComponent.fromLegacy(prefix + l));
+                }
+            };
+        }
+    }
+}

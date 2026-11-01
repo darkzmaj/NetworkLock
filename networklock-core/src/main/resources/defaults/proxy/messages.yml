@@ -1,0 +1,15 @@
+# NetworkLock - messages
+# Colors: &0-&9 &a-&f, styles: &l &o &n &m &k &r, hex: &#ff8800. MiniMessage tags also work.
+
+prefix: "&8[&bNetworkLock&8] "
+
+messages:
+  no-permission: "&cYou do not have permission."
+  reloaded: "&aConfiguration reloaded."
+  reload-failed: "&cReload failed, the old config is still active. Check the console."
+  invalid-command: "&cUnknown command. Use &f/networklock help&c."
+  authentication-failed: "&cConnection authentication failed."
+  authentication-timeout: "&cAuthentication timed out. Please reconnect."
+  connection-limited: "&cToo many connection attempts. Please wait a moment."
+  temporarily-blocked: "&cConnection temporarily restricted."
+  security-error: "&cUnable to establish a secure connection. Please try again later."

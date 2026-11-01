@@ -1,0 +1,1 @@
+{"id":"networklock","name":"NetworkLock","version":"${version}","description":"Proxy-to-backend login authentication and connection protection.","url":"https://github.com/darkzmaj/NetworkLock","authors":["NetworkLock contributors"],"dependencies":[],"main":"dev.korinetwork.networklock.velocity.NetworkLockVelocity"}

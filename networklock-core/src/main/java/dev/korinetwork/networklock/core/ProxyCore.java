@@ -1,0 +1,186 @@
+package dev.korinetwork.networklock.core;
+
+import dev.korinetwork.networklock.core.config.ConfigException;
+import dev.korinetwork.networklock.core.config.ConfigFiles;
+import dev.korinetwork.networklock.core.config.Messages;
+import dev.korinetwork.networklock.core.config.Settings;
+
+import java.io.IOException;
+import java.net.InetAddress;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.atomic.LongAdder;
+import java.util.function.LongSupplier;
+
+/** Proxy-side runtime: login throttling, token minting and the proxy-owned messages. */
+public final class ProxyCore {
+
+    public enum Admission { ALLOWED, LIMITED, BLOCKED, LOCKDOWN }
+
+    private record Active(Settings.Proxy settings, Messages messages, ConnectionLimiter limiter) {}
+
+    private final Path dataDir;
+    private final Log log;
+    private final SecurityLog securityLog;
+    private final LongSupplier clock;
+    private final Map<String, String> env;
+    private final LongAdder minted = new LongAdder();
+    private final LongAdder limited = new LongAdder();
+    private final LongAdder blocked = new LongAdder();
+    private final LongAdder lockdownDenied = new LongAdder();
+    private final LongAdder backendRejections = new LongAdder();
+
+    private volatile Active active;
+    private volatile String lockdownReason = "not started";
+
+    public ProxyCore(Path dataDir, Log log, LongSupplier clock, Map<String, String> env) {
+        this.dataDir = dataDir;
+        this.log = log;
+        this.securityLog = new SecurityLog(log);
+        this.clock = clock;
+        this.env = env;
+    }
+
+    public boolean start() {
+        try {
+            Path config = ConfigFiles.ensure(dataDir, "proxy", ConfigFiles.CONFIG);
+            ConfigFiles.ensure(dataDir, "proxy", ConfigFiles.MESSAGES);
+            if (ConfigFiles.generateProxyKeyIfUnset(config)) {
+                log.warn("Generated a new proxy key in config.yml. Add this proxy's id and key to every backend's"
+                        + " authentication.trusted-proxies list, then run /networklock reload there.");
+            }
+        } catch (IOException e) {
+            lockdown("cannot create configuration files: " + e.getMessage());
+            return false;
+        }
+        return reload().isEmpty();
+    }
+
+    /** Validates config.yml and messages.yml together and swaps both in only if both are valid. */
+    public List<String> reload() {
+        Settings.Proxy s;
+        Messages m;
+        try {
+            s = Settings.Proxy.load(dataDir.resolve(ConfigFiles.CONFIG), env);
+            m = Messages.load(dataDir.resolve(ConfigFiles.MESSAGES));
+        } catch (ConfigException e) {
+            for (String p : e.problems()) log.error("Configuration problem: " + p);
+            if (active == null) lockdown("invalid configuration");
+            return e.problems();
+        }
+        active = new Active(s, m, new ConnectionLimiter(s.limiter()));
+        lockdownReason = null;
+        log.info("Proxy '" + s.networkId() + "' ready, key fingerprint " + s.keyFingerprint());
+        return List.of();
+    }
+
+    private void lockdown(String reason) {
+        active = null;
+        lockdownReason = reason;
+        log.error("LOCKDOWN: logins will be refused until this is fixed (" + reason + ")");
+    }
+
+    public Admission admit(InetAddress address) {
+        Active a = active;
+        if (a == null) {
+            lockdownDenied.increment();
+            return Admission.LOCKDOWN;
+        }
+        long now = clock.getAsLong();
+        if (a.limiter().recordAttemptAndCheckFlood(now)) {
+            log.warn("Connection flood: more than " + a.settings().limiter().floodThreshold()
+                    + " login attempts in one second across all addresses");
+        }
+        Admission result = switch (a.limiter().check(address, now)) {
+            case ALLOWED -> Admission.ALLOWED;
+            case LIMITED -> Admission.LIMITED;
+            case BLOCKED -> Admission.BLOCKED;
+        };
+        if (result != Admission.ALLOWED) {
+            (result == Admission.LIMITED ? limited : blocked).increment();
+            if (a.settings().logging().securityEvents()) {
+                boolean redact = a.settings().logging().redactAddresses();
+                securityLog.event(() -> "Throttled login from " + SecurityLog.address(address, redact) + " (" + result + ")", now);
+            }
+        }
+        return result;
+    }
+
+    /** A fresh token for one backend connection, or null while in lockdown. */
+    public String mint(PlayerIdentity identity, String targetServer) {
+        Active a = active;
+        if (a == null) return null;
+        String token = ForwardingToken.mint(a.settings().networkId(), a.settings().key(), targetServer, identity, clock.getAsLong());
+        minted.increment();
+        if (a.settings().logging().debug()) log.info("Signed connection of " + identity.name() + " to " + targetServer);
+        return token;
+    }
+
+    /**
+     * If a backend kick carries a NetworkLock reject code, returns the {@code messages.yml}
+     * text to show instead; otherwise null.
+     */
+    public String translateBackendKick(String plainReason) {
+        Outcome.RejectCode code = Outcome.RejectCode.fromKickText(plainReason == null ? null : plainReason.trim());
+        if (code == null) return null;
+        backendRejections.increment();
+        return messages().get(code.messageKey());
+    }
+
+    public Messages messages() {
+        Active a = active;
+        return a == null ? Messages.defaults() : a.messages();
+    }
+
+    public boolean inLockdown() {
+        return active == null;
+    }
+
+    public List<String> statusLines() {
+        Active a = active;
+        if (a == null) return List.of("State: LOCKDOWN - logins refused (" + lockdownReason + ")");
+        long now = clock.getAsLong();
+        List<String> out = new ArrayList<>();
+        out.add("State: enforcing");
+        out.add("Proxy id: " + a.settings().networkId());
+        out.add("Key fingerprint: " + a.settings().keyFingerprint());
+        out.add("Connection limit: " + (a.settings().limiter().enabled()
+                ? a.settings().limiter().maxAttempts() + " per " + a.settings().limiter().windowSeconds() + "s" : "disabled"));
+        out.add("Tracked addresses: " + a.limiter().tracked() + ", temporarily blocked: " + a.limiter().blocked(now));
+        return out;
+    }
+
+    public List<String> statsLines() {
+        return List.of("signed connections: " + minted.sum(), "throttled logins: " + limited.sum(),
+                "blocked logins: " + blocked.sum(), "refused during lockdown: " + lockdownDenied.sum(),
+                "backend rejections: " + backendRejections.sum());
+    }
+
+    public List<String> proxiesLines() {
+        Active a = active;
+        if (a == null) return List.of("No configuration loaded (lockdown).");
+        return List.of("This proxy: " + a.settings().networkId() + " (key fingerprint " + a.settings().keyFingerprint() + ")",
+                "Backends must list this id with a key of the same fingerprint.");
+    }
+
+    public List<String> doctorLines() {
+        Active a = active;
+        List<String> out = new ArrayList<>();
+        if (a == null) {
+            out.add("FAIL lockdown: " + lockdownReason);
+            return out;
+        }
+        out.add("OK   configuration valid; key fingerprint " + a.settings().keyFingerprint());
+        if (a.settings().networkId().equals("proxy-1")) {
+            out.add("INFO network.id is the default 'proxy-1'; give every proxy a distinct id when you run more than one");
+        }
+        if (!a.settings().limiter().enabled()) out.add("WARN connection limiting is disabled");
+        if (a.limiter().saturated()) out.add("WARN address tracker is full; new addresses are not being throttled");
+        if (ConfigFiles.isWorldOrGroupReadable(dataDir.resolve(ConfigFiles.CONFIG))) {
+            out.add("WARN config.yml (holds the proxy key) is readable by other users; run chmod 600 on it");
+        }
+        return out;
+    }
+}

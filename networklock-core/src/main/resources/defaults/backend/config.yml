@@ -1,0 +1,14 @@
+# NetworkLock - server
+
+network:
+  server-id: ""            # this server's name in your proxy config, e.g. "lobby"
+
+authentication:
+  # Proxies allowed to send players here.
+  # Each key is security.key in that proxy's NetworkLock config.yml.
+  trusted-proxies: []
+  #  - id: "proxy-1"
+  #    keys: ["paste the proxy key here"]
+
+logging:
+  debug: false

@@ -1,0 +1,73 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: gradle/actions/setup-gradle@v4
+      - run: ./gradlew --no-daemon test shadowJar
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NetworkLock
+          path: build/libs/NetworkLock.jar
+
+  integration:
+    # Real Paper, Velocity and Waterfall servers; downloads ~100 MB of checksum-verified jars.
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: gradle/actions/setup-gradle@v4
+      - run: ./gradlew --no-daemon shadowJar
+      - run: it/run-integration.sh
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-logs
+          path: it/work/auto/srv/*/console.log
+
+  secrets:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read   # gitleaks lists PR commits through the API
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  dependencies:
+    # Scans what NetworkLock.jar actually bundles (root gradle.lockfile = shaded runtime classpath).
+    # Platform APIs are compileOnly and supplied by the server, so their advisories belong to the server.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: OSV-Scanner on shipped dependencies
+        run: |
+          base=https://github.com/google/osv-scanner/releases/download/v2.7.0
+          curl -fsSL -o osv-scanner "$base/osv-scanner_linux_amd64"
+          curl -fsSL -o sums.txt "$base/osv-scanner_SHA256SUMS"
+          grep " osv-scanner_linux_amd64$" sums.txt | sed 's/osv-scanner_linux_amd64$/osv-scanner/' | sha256sum -c -
+          chmod +x osv-scanner
+          ./osv-scanner scan source -L gradle.lockfile
