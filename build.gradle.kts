@@ -49,7 +49,7 @@ dependencies {
 
 tasks.shadowJar {
     archiveFileName.set("NetworkLock.jar")
-    from("LICENSE", "THIRD-PARTY-NOTICES.txt") { into("META-INF") }
+    from(files("LICENSE", "THIRD-PARTY-NOTICES.txt")) { into("META-INF") }
     // Our own copy of SnakeYAML: platform-provided versions differ (1.x vs 2.x) and are not safe-load by default.
     relocate("org.yaml.snakeyaml", "dev.korinetwork.networklock.lib.snakeyaml")
     exclude("META-INF/maven/**", "META-INF/versions/**", "module-info.class", "META-INF/*.SF", "META-INF/*.DSA", "META-INF/*.RSA")
