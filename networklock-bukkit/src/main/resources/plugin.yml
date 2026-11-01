@@ -4,7 +4,7 @@ version: "${version}"
 api-version: "1.21"
 load: STARTUP
 folia-supported: true
-description: Proxy-to-backend login authentication and connection protection.
+description: Makes players join your servers only through your proxy.
 website: https://github.com/darkzmaj/NetworkLock
 authors: [NetworkLock contributors]
 

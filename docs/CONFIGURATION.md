@@ -1,76 +1,94 @@
 # Configuration
 
-NetworkLock reads exactly two files from its data folder:
+NetworkLock uses two files:
 
-- `config.yml` on every server,
-- `messages.yml` on proxies only.
+- `config.yml` on every server and proxy
+- `messages.yml` on proxies only
 
-Backends never create `messages.yml`. Every file is validated as a whole: a reload applies all of it or none of it.
-
-The default files contain only the common settings. The rest are listed below with their defaults; add them to the file if you need to change them.
+The default files only contain the settings most people change. Everything else is listed below; add a line to the file if you want to change it. A reload checks the whole file first and only applies it if everything is valid.
 
 ## Where the key comes from
 
-Start the proxy once. NetworkLock writes a random key into the proxy's `config.yml` under `security.key`. Copy that value into every server's `authentication.trusted-proxies` entry for that proxy. Each proxy gets its own key. `/networklock proxies` shows a fingerprint on both sides so you can check they match without showing the key.
+Start the proxy once. NetworkLock creates a random key and saves it in the proxy's `config.yml` as `security.key`. Copy that key into the `trusted-proxies` list on each game server.
 
-## Proxy `config.yml`
+Every proxy gets its own key. Run `/networklock proxies` on both sides to compare short fingerprints of the keys, so you can check they match without showing the key itself.
 
-| Key | Default | Meaning |
+## Proxy config.yml
+
+| Setting | Default | What it does |
 |---|---|---|
-| `network.id` | `proxy-1` | Unique proxy id, `A-Z a-z 0-9 . _ -`, max 64. Backends list it. |
-| `security.key` | generated | 32-byte base64url key. Also accepts `env:VAR` or `file:/path`. Generated only when the value is `""`; never overwritten. |
-| `protection.connection-limit.enabled` | `true` | Per-address login throttling |
-| `protection.connection-limit.max-attempts` | `10` | Logins per window, which is also the burst size |
-| `protection.connection-limit.window-seconds` | `10` | Window length; tokens refill continuously |
-| `protection.connection-limit.ipv6-prefix-length` | `64` | IPv6 grouping prefix (32–128) |
-| `protection.temporary-blocks.enabled` | `true` | Block repeat offenders |
-| `protection.temporary-blocks.violations-before-block` | `5` | Throttled attempts in a row before a block |
-| `protection.temporary-blocks.duration-seconds` | `60` | Block length |
-| `protection.exempt` | `[]` | IPs or CIDR ranges never throttled (hostnames are rejected) |
-| `protection.flood-warning-threshold` | `200` | Network-wide attempts per second that trigger a warning |
-| `protection.max-tracked-addresses` | `100000` | Memory bound for the address table |
-| `logging.security-events` | `true` | Log denials and throttling (rate-limited) |
-| `logging.redact-addresses` | `false` | Mask client IPs in NetworkLock log lines |
-| `logging.debug` | `false` | Log every signed connection |
+| `network.id` | `proxy-1` | Name of this proxy. Use a different one on every proxy. |
+| `security.key` | created on first start | The secret key. Can also be `env:VARIABLE` or `file:/path/to/file`. |
+| `protection.connection-limit.enabled` | `true` | Limit how often one IP can try to log in. |
+| `protection.connection-limit.max-attempts` | `10` | Logins allowed per IP... |
+| `protection.connection-limit.window-seconds` | `10` | ...within this many seconds. |
+| `protection.temporary-blocks.enabled` | `true` | Block IPs that keep going over the limit. |
+| `protection.temporary-blocks.duration-seconds` | `60` | How long a block lasts. |
+| `protection.exempt` | `[]` | IPs or ranges that are never limited, for example `["10.0.0.0/8"]`. |
+| `logging.debug` | `false` | Log every player the proxy signs. |
 
-## Backend `config.yml`
+Extra settings, not in the default file:
 
-| Key | Default | Meaning |
+| Setting | Default | What it does |
 |---|---|---|
-| `network.server-id` | `""` (required) | This server's name in the proxy config. Credentials signed for another name are rejected. |
-| `authentication.trusted-proxies` | `[]` (required) | List of `{id, keys: [...]}`. A single `key:` is also accepted. Each key may be `env:VAR` or `file:/path`. |
-| `authentication.max-token-age-seconds` | `30` | Credential lifetime (5–300) |
-| `authentication.max-clock-skew-seconds` | `5` | Allowed proxy clock lead (0–60). Keep clocks NTP-synced. |
-| `authentication.replay-cache-max-entries` | `100000` | Replay-cache ceiling. Logins fail closed beyond it. |
-| `logging.*` | as proxy | |
+| `protection.connection-limit.ipv6-prefix-length` | `64` | IPv6 addresses in the same block of this size count as one IP. |
+| `protection.temporary-blocks.violations-before-block` | `5` | How many times an IP can go over the limit before it is blocked. |
+| `protection.flood-warning-threshold` | `200` | Logins per second, across all IPs, that trigger a warning in the console. |
+| `protection.max-tracked-addresses` | `100000` | Memory cap for the login limiter. |
+| `logging.security-events` | `true` | Log blocked logins (limited to 20 lines every 10 seconds). |
+| `logging.redact-addresses` | `false` | Hide the end of IP addresses in NetworkLock's log lines. |
 
-There's deliberately no option to turn authentication off. To stop enforcing, remove the plugin; NetworkLock never reports a backend as protected while it isn't.
+## Game server config.yml
 
-## Proxy `messages.yml`
-
-Messages use `&` colour codes by default: `&0`–`&9` and `&a`–`&f` for colours, `&l &o &n &m &k` for styles, `&r` to reset, and `&#rrggbb` for hex colours. MiniMessage tags such as `<aqua>` work too, and can be mixed with `&` codes. Keys: `prefix`, and under `messages:` `no-permission`, `reloaded`, `reload-failed`, `invalid-command`, `authentication-failed`, `authentication-timeout`, `connection-limited`, `temporarily-blocked`, `security-error`.
-
-Missing keys fall back to built-in defaults, and values longer than 1024 characters are rejected. On BungeeCord-family proxies, colours and styles are rendered; MiniMessage click, hover and other interactive tags are dropped.
-
-Backends kick with the fixed text `Unable to verify your connection. Please join through the network. [NL-xx]`. The proxy replaces it as follows:
-
-| Code | Cause | messages.yml key |
+| Setting | Default | What it does |
 |---|---|---|
-| NL-01 | No credential (direct connection, or proxy without NetworkLock) | `authentication-failed` |
-| NL-02 | Invalid, unknown proxy, wrong key, or wrong target server | `authentication-failed` |
-| NL-03 | Expired or from the future (clock skew) | `authentication-timeout` |
-| NL-04 | Replayed | `authentication-failed` |
-| NL-05 | Backend in lockdown, replay cache full, or internal error | `security-error` |
+| `network.server-id` | empty, must be set | This server's name in your proxy config, for example `lobby`. |
+| `authentication.trusted-proxies` | empty, must be set | The proxies allowed to send players here, each with `id` and `keys`. A key can also be `env:VARIABLE` or `file:/path`. |
+| `logging.debug` | `false` | Log every accepted player. |
 
-## Key rotation (no downtime)
+Extra settings, not in the default file:
 
-1. Generate a new key on the proxy. One way is to set `key: ""` in a copy of the config and start a throwaway proxy; another is any 32-byte random value in base64url.
-2. On every backend, add the new key to that proxy's `keys:` list next to the old one, then run `/networklock reload`.
+| Setting | Default | What it does |
+|---|---|---|
+| `authentication.max-token-age-seconds` | `30` | How long a proxy's signature stays valid. |
+| `authentication.max-clock-skew-seconds` | `5` | How far ahead a proxy's clock may be. Keep server clocks synced. |
+| `authentication.replay-cache-max-entries` | `100000` | How many used signatures to remember. If it fills up, logins are refused. |
+| `logging.security-events` | `true` | Log refused logins. |
+| `logging.redact-addresses` | `false` | Hide the end of IP addresses in log lines. |
+
+There is no setting to switch the protection off. If you want it off, remove the plugin.
+
+## messages.yml (proxy only)
+
+Messages use `&` colour codes:
+
+- `&0` to `&9` and `&a` to `&f` for colours
+- `&l` bold, `&o` italic, `&n` underline, `&m` strikethrough, `&k` obfuscated, `&r` reset
+- `&#ff8800` for any hex colour
+
+MiniMessage tags like `<aqua>` also work, and you can mix them with `&` codes.
+
+The available messages are `prefix`, `no-permission`, `reloaded`, `reload-failed`, `invalid-command`, `authentication-failed`, `authentication-timeout`, `connection-limited`, `temporarily-blocked` and `security-error`. If one is missing from the file, the built-in text is used.
+
+Game servers have no messages file. When a game server refuses a player, it sends a short fixed text with a code, and the proxy swaps it for your message:
+
+| Code | Reason | Message used |
+|---|---|---|
+| NL-01 | Player came without a signature (direct connection) | `authentication-failed` |
+| NL-02 | Signature is wrong, from an unknown proxy, or for another server | `authentication-failed` |
+| NL-03 | Signature expired | `authentication-timeout` |
+| NL-04 | Signature was already used | `authentication-failed` |
+| NL-05 | Server is locked down or hit an internal error | `security-error` |
+
+## Changing a key without downtime
+
+1. Make a new key, for example with `openssl rand -base64 32`.
+2. On every game server, add the new key next to the old one in that proxy's `keys` list, then run `/networklock reload`.
 3. Put the new key in the proxy's `security.key` and run `/networklock reload` there.
-4. Remove the old key from every backend and reload. Check with `/networklock proxies` that the fingerprints match.
+4. Remove the old key from the game servers and reload again.
 
-To **revoke** a compromised proxy, remove its entry (or key) from every backend and reload. Its credentials stop working immediately.
+If a key gets leaked, remove it (or the whole proxy entry) from every game server and reload. It stops working straight away.
 
-## Migrating from BungeeGuard
+## Switching from BungeeGuard
 
-Remove BungeeGuard from proxies and backends, install NetworkLock on both, and copy each proxy's key into the backends' `trusted-proxies`. If you use Velocity's built-in `bungeeguard` forwarding mode, switch it to `modern` (tested) or `legacy` (tested). `bungeeguard` mode with NetworkLock has not been tested.
+Remove BungeeGuard from the proxy and the game servers, install NetworkLock on both, and copy each proxy's key into the game servers' `trusted-proxies`. If Velocity is set to `bungeeguard` forwarding you can keep it; `modern` is recommended.

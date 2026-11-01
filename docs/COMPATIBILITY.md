@@ -1,35 +1,43 @@
-# Compatibility matrix
+# Compatibility
 
-Every entry below ran **the same `NetworkLock.jar`** (1.0.0-SNAPSHOT, branch `networklock-redesign`) on Windows 11, 2026-11-01. Server jars came from the official PaperMC download API (SHA-256 verified) and from BungeeCord's official Jenkins.
+Every server below was tested with the same `NetworkLock.jar` (1.0.0). Server jars came from the official download sites and were checksum-checked where a checksum is published.
 
-| Platform | Build | Java | Loaded | Result |
-|---|---|---|---|---|
-| Paper | 1.21.11 #132 | Microsoft OpenJDK 21.0.10 | yes | **Verified**: legacy and Velocity-modern forwarding, all direct-attack cases, reload, doctor, 48-way concurrent burst |
-| Paper | 26.3 #236 | Temurin 25.0.5 | yes | **Verified**: Velocity modern via Velocity 4.3.1; status/doctor |
-| Folia | 1.21.11 #14 | OpenJDK 21.0.10 | yes | **Verified**: legacy forwarding, direct attacks, replay, wrong target, status/reload/doctor on the region-threaded server |
-| Velocity | 3.5.1 #615 | OpenJDK 21.0.10 | yes | **Verified**: legacy and modern forwarding, kick-message translation, key generation, doctor |
-| Velocity | 4.3.1 #45 | Temurin 25.0.5 | yes | **Verified**: modern forwarding to Paper 26.3 (jar compiled against velocity-api 3.4.0) |
-| Waterfall | 1.21 #615 | OpenJDK 21.0.10 | yes | **Verified**: legacy forwarding, offline-mode profile injection, key from `env:` |
-| BungeeCord | Jenkins lastSuccessfulBuild (downloaded 2026-11-01, sha256 `1d9dbc31…71fd`) | OpenJDK 21.0.10 | yes | **Verified**: legacy forwarding, throttling and temporary blocks, rejected invalid reload |
-| Purpur, Pufferfish | n/a | | | **Not tested.** Expected to work (Paper forks with the same API), but unverified |
-| FlameCord | n/a | | | **Not tested.** Expected to work (BungeeCord fork), but unverified |
-| Spigot | n/a | | | **Unsupported.** Lacks the Paper profile API; NetworkLock loads a deny-all listener and stays in lockdown (logic unit-tested, not run on Spigot) |
+## Game servers
+
+| Server | Version tested | Java | Result |
+|---|---|---|---|
+| Paper | 1.21.11 (build 132) | 21 | Works. Tested with BungeeCord and Velocity forwarding. |
+| Paper | 26.3 (build 236) | 25 | Works. Tested behind Velocity 4.3.1. |
+| Folia | 1.21.11 (build 14) | 21 | Works. Tested directly and behind Velocity and Waterfall. |
+| Purpur | 1.21.11 (build 2568) | 21 | Works. |
+| Pufferfish | 1.21.10 (build 39) | 21 | Works. |
+| Spigot | 1.21.11 (BuildTools) | 21 | Not supported. NetworkLock loads, says why in the console, and lets nobody join. |
+
+Spigot is missing the Paper API that NetworkLock uses to check players before they join, so it locks the server rather than running without protection.
+
+## Proxies
+
+| Proxy | Version tested | Java | Result |
+|---|---|---|---|
+| Velocity | 3.5.1 (build 615) | 21 | Works with `modern`, `legacy` and `bungeeguard` forwarding. |
+| Velocity | 4.3.1 (build 45) | 25 | Works with `modern` forwarding. |
+| Waterfall | 1.21 (build 615) | 21 | Works. |
+| BungeeCord | latest Jenkins build, downloaded 2026-11-01 | 21 | Works. |
+| FlameCord | not tested | | No official build could be found. It is a BungeeCord fork, so it should work. |
 
 ## Requirements
 
-- Java 21 or newer (bytecode targets 21).
-- Backend: Paper API with `AsyncPlayerPreLoginEvent#getPlayerProfile/setPlayerProfile` (Paper 1.21+ tested).
-- Proxy forwarding enabled: Velocity `modern` or `legacy`, or BungeeCord `ip_forward: true`.
+- Java 21 or newer.
+- Game servers: Paper or a Paper fork, 1.21 or newer.
+- Proxy forwarding switched on: `modern`, `legacy` or `bungeeguard` on Velocity, `ip_forward: true` on BungeeCord and Waterfall.
 
-## How one jar serves every platform
+## How one jar runs everywhere
 
-The jar contains `plugin.yml` (Bukkit family), `bungee.yml` (BungeeCord family, which prefers it over `plugin.yml`) and `velocity-plugin.json` (Velocity). Each names a different entry class. A platform only loads its own entry class, and no class references another platform's API, so nothing incompatible is ever linked. Core code is platform-free.
+The jar contains a `plugin.yml` for Paper, a `bungee.yml` for BungeeCord and a `velocity-plugin.json` for Velocity. Each server reads only its own file and loads only its own start class, so code for the other platforms is never touched.
 
-SnakeYAML is bundled and relocated (`dev.korinetwork.networklock.lib.snakeyaml`) and used with `SafeConstructor`, because platforms ship different versions. The manifest declares `paperweight-mappings-namespace: mojang`, so Paper skips its Spigot remapping pass.
+## Things worth knowing
 
-## Known platform notes
-
-- **Paper**: enable only one forwarding mode. With both `settings.bungeecord` and Velocity forwarding on, Paper 1.21.11 refuses Velocity connections; `doctor` reports this.
-- **Paper 26.x** shipped with the whitelist enabled in our test; that rejection is Paper's, not NetworkLock's.
-- **Velocity** keeps its own 3-second per-IP `login-ratelimit` in addition to NetworkLock's throttling.
-- **BungeeCord family**: NetworkLock changes forwarded properties through `InitialHandler#loginProfile` by reflection (the API offers no way). If a future build renames it, the proxy refuses logins instead of forwarding unsigned connections, and `doctor` reports `FAIL proxy internals not recognised`.
+- Paper: turn on only one forwarding mode. If both BungeeCord mode and Velocity forwarding are on, Paper refuses Velocity players. `/networklock doctor` warns about this.
+- Paper 26.x had its whitelist switched on in our tests. If players get "not whitelisted", that comes from Paper, not NetworkLock.
+- Velocity has its own 3-second login limit per IP on top of NetworkLock's.
+- On BungeeCord and Waterfall, NetworkLock has to reach into a proxy internal to attach its signature. If a future proxy update changes that internal, the proxy refuses logins instead of letting unsigned players through, and `doctor` tells you.

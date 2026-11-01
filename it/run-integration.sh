@@ -8,9 +8,12 @@
 #
 #   it/run-integration.sh            # Paper 1.21.11 + Velocity 3.5.1 + Waterfall 1.21
 #   PAPER=1.21.11 VELOCITY=3.5.1 WATERFALL=1.21 it/run-integration.sh
+#   BACKEND=folia VELOCITY_MODE=bungeeguard it/run-integration.sh   # Folia backend, Velocity bungeeguard forwarding
 set -uo pipefail
 
 PAPER=${PAPER:-1.21.11}
+BACKEND=${BACKEND:-paper}              # paper or folia (both use the PAPER version)
+VELOCITY_MODE=${VELOCITY_MODE:-legacy}  # legacy or bungeeguard (both work with BungeeCord-mode backends)
 VELOCITY=${VELOCITY:-3.5.1}
 WATERFALL=${WATERFALL:-1.21}
 ROOT=$(pwd)
@@ -68,7 +71,7 @@ logged() { # description, file, pattern
 }
 
 echo "== fetching servers"
-PAPER_JAR=$(fetch paper "$PAPER") && VEL_JAR=$(fetch velocity "$VELOCITY") && WF_JAR=$(fetch waterfall "$WATERFALL") \
+PAPER_JAR=$(fetch "$BACKEND" "$PAPER") && VEL_JAR=$(fetch velocity "$VELOCITY") && WF_JAR=$(fetch waterfall "$WATERFALL") \
     || { echo "download or checksum failed"; exit 2; }
 javac -d "$WORK/probe" -cp "$ROOT/networklock-core/build/classes/java/main" "$ROOT/it/Probe.java" || exit 2
 
@@ -99,11 +102,11 @@ network:
 security:
   key: "$KV"
 EOF
-cat > "$V/velocity.toml" <<'EOF'
+cat > "$V/velocity.toml" <<EOF
 config-version = "2.7"
 bind = "127.0.0.1:25600"
 online-mode = false
-player-info-forwarding-mode = "legacy"
+player-info-forwarding-mode = "$VELOCITY_MODE"
 login-ratelimit = 0
 [servers]
 lobby = "127.0.0.1:25566"

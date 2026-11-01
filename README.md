@@ -11,7 +11,7 @@ You put the **same `NetworkLock.jar`** on your proxies and your game servers, an
 
 ## Works on
 
-Velocity, BungeeCord, Waterfall (proxies) and Paper, Folia (game servers). Java 21 or newer. See the [compatibility matrix](docs/COMPATIBILITY.md) for exact tested versions.
+Velocity, BungeeCord and Waterfall (proxies), and Paper, Folia, Purpur and Pufferfish (game servers). Java 21 or newer. Plain Spigot is not supported. See the [compatibility matrix](docs/COMPATIBILITY.md) for exact tested versions.
 
 ## Setup
 

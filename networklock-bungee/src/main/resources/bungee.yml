@@ -2,4 +2,4 @@ name: NetworkLock
 main: dev.korinetwork.networklock.bungee.NetworkLockBungee
 version: "${version}"
 author: NetworkLock contributors
-description: Proxy-to-backend login authentication and connection protection.
+description: Makes players join your servers only through your proxy.

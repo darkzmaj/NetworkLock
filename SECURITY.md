@@ -1,7 +1,7 @@
-# Security policy
+# Security
 
-Please report vulnerabilities privately through GitHub's "Report a vulnerability" (Security → Advisories) on this repository. Don't open public issues. Include affected versions, platform builds, configuration (with keys removed) and reproduction steps. We aim to acknowledge reports within 72 hours.
+Found a way around NetworkLock? Please report it privately on GitHub (Security tab, "Report a vulnerability") instead of opening a public issue.
 
-In scope: authentication bypass, identity spoofing, replay, credential disclosure, fail-open behaviour, and resource exhaustion in NetworkLock code. Out of scope: volumetric DDoS, attacks that require an attacker on the proxy-backend link (documented in [the threat model](docs/THREAT-MODEL.md)), and vulnerabilities in the server software itself.
+Include the NetworkLock version, your server and proxy versions, your config with the keys removed, and steps to reproduce it. You should get a reply within 3 days.
 
-Never include real keys in reports. If a key may have leaked, rotate it as described in [CONFIGURATION.md](docs/CONFIGURATION.md#key-rotation-no-downtime).
+Please never send real keys. If a key may have leaked, change it as described in [CONFIGURATION.md](docs/CONFIGURATION.md#changing-a-key-without-downtime).
