@@ -23,7 +23,7 @@ import java.util.function.Supplier;
  */
 public final class UsageStats {
 
-    // shortcut: placeholder until the stats API is live; failed pings are silent, so this is harmless until then
+    // the official stats endpoint; until the API is live, pings fail silently and nothing else is affected
     static final URI ENDPOINT = URI.create("https://api.kori.my/networklock/v1/ping");
 
     private final String version;
