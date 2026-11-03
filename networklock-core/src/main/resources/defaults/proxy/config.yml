@@ -18,5 +18,18 @@ protection:
     duration-seconds: 60
   exempt: []               # IPs never limited, e.g. ["10.0.0.0/8"]
 
+commands:
+  name: "networklock"      # restart the proxy after changing these
+  aliases: ["nlock"]
+
+updates:
+  check: true              # look for new versions on GitHub
+  notify: true             # tell staff with networklock.notify when they join
+
+metrics:
+  # Counts this proxy in the public "servers protected by NetworkLock" number, once a day.
+  # Sends only an anonymous ID, the plugin version and the platform. Set to false to opt out.
+  enabled: true
+
 logging:
   debug: false

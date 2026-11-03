@@ -138,6 +138,29 @@ public final class ProxyCore {
         return active == null;
     }
 
+    /** Whether update checks are on; true while no config is loaded. */
+    public boolean updatesEnabled() {
+        Active a = active;
+        return a == null || a.settings().updates().check();
+    }
+
+    public boolean metricsEnabled() {
+        Active a = active;
+        return a != null && a.settings().updates().metrics();
+    }
+
+    /** Anonymous ID for the usage counter, derived one-way from the proxy key; null while in lockdown. */
+    public String usageId() {
+        Active a = active;
+        return a == null ? null : UsageStats.anonymousId("proxy", a.settings().keyFingerprint());
+    }
+
+    /** Whether staff are told about new versions when they join. */
+    public boolean notifyEnabled() {
+        Active a = active;
+        return a != null && a.settings().updates().check() && a.settings().updates().notifyOnJoin();
+    }
+
     public List<String> statusLines() {
         Active a = active;
         if (a == null) return List.of("State: LOCKDOWN - logins refused (" + lockdownReason + ")");

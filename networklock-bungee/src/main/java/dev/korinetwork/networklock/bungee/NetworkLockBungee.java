@@ -7,11 +7,16 @@ import dev.korinetwork.networklock.core.JulLog;
 import dev.korinetwork.networklock.core.MiniText;
 import dev.korinetwork.networklock.core.PlayerIdentity;
 import dev.korinetwork.networklock.core.ProxyCore;
+import dev.korinetwork.networklock.core.UpdateChecker;
+import dev.korinetwork.networklock.core.UsageStats;
+import dev.korinetwork.networklock.core.config.ConfigFiles;
+import dev.korinetwork.networklock.core.config.Settings;
 import net.md_5.bungee.api.CommandSender;
 import net.md_5.bungee.api.chat.BaseComponent;
 import net.md_5.bungee.api.chat.TextComponent;
 import net.md_5.bungee.api.connection.ProxiedPlayer;
 import net.md_5.bungee.api.event.LoginEvent;
+import net.md_5.bungee.api.event.PostLoginEvent;
 import net.md_5.bungee.api.event.PreLoginEvent;
 import net.md_5.bungee.api.event.ServerConnectEvent;
 import net.md_5.bungee.api.event.ServerConnectedEvent;
@@ -32,11 +37,19 @@ public final class NetworkLockBungee extends Plugin implements Listener {
 
     private ProxyCore core;
     private BungeeProfiles profiles;
+    private UpdateChecker updates;
+    private UsageStats stats;
 
     @Override
     public void onEnable() {
-        core = new ProxyCore(getDataFolder().toPath(), new JulLog(getLogger()), System::currentTimeMillis, System.getenv());
+        JulLog log = new JulLog(getLogger());
+        core = new ProxyCore(getDataFolder().toPath(), log, System::currentTimeMillis, System.getenv());
         core.start();
+        updates = new UpdateChecker(getDescription().getVersion(), log, core::updatesEnabled);
+        updates.start();
+        stats = new UsageStats(getDescription().getVersion(), getProxy().getName().toLowerCase(java.util.Locale.ROOT),
+                "proxy", core::usageId, core::metricsEnabled);
+        stats.start();
         try {
             profiles = new BungeeProfiles();
         } catch (ReflectiveOperationException | RuntimeException e) {
@@ -44,7 +57,8 @@ public final class NetworkLockBungee extends Plugin implements Listener {
                     + " so backends will reject every player.");
         }
         getProxy().getPluginManager().registerListener(this, this);
-        getProxy().getPluginManager().registerCommand(this, new NetworkLockCommand());
+        getProxy().getPluginManager().registerCommand(this,
+                new NetworkLockCommand(Settings.CommandNames.read(getDataFolder().toPath().resolve(ConfigFiles.CONFIG))));
         for (String line : doctor()) {
             if (!line.startsWith("OK")) getLogger().warning("doctor: " + line);
         }
@@ -64,6 +78,22 @@ public final class NetworkLockBungee extends Plugin implements Listener {
             e.setReason(render(key));
             e.setCancelled(true);
         }
+    }
+
+    @Override
+    public void onDisable() {
+        if (updates != null) updates.stop();
+        if (stats != null) stats.stop();
+    }
+
+    /** Tells staff about a newer version when they join. */
+    @EventHandler
+    public void onPostLogin(PostLoginEvent e) {
+        ProxiedPlayer p = e.getPlayer();
+        if (!core.notifyEnabled()) return;
+        if (!p.hasPermission(Commands.NOTIFY_PERMISSION) && !p.hasPermission(Commands.ADMIN_PERMISSION)) return;
+        String notice = Commands.updateNotice(core.messages().get("update-available"), updates);
+        if (notice != null) p.sendMessage(renderMini(notice));
     }
 
     @EventHandler(priority = EventPriority.LOWEST)
@@ -147,13 +177,13 @@ public final class NetworkLockBungee extends Plugin implements Listener {
     }
 
     private final class NetworkLockCommand extends Command implements TabExecutor {
-        NetworkLockCommand() {
-            super("networklock", null, "nlock");
+        NetworkLockCommand(Settings.CommandNames names) {
+            super(names.name(), null, names.aliases().toArray(new String[0]));
         }
 
         @Override
         public void execute(CommandSender sender, String[] args) {
-            Commands.dispatch(args, sender(sender), new Commands.Target() {
+            Commands.dispatch(getName(), args, sender(sender), new Commands.Target() {
                 public List<String> status() {
                     List<String> l = new ArrayList<>(core.statusLines());
                     l.add("Platform: " + getProxy().getName() + " " + getProxy().getVersion());
@@ -163,7 +193,9 @@ public final class NetworkLockBungee extends Plugin implements Listener {
                 public List<String> proxies() { return core.proxiesLines(); }
                 public List<String> doctor() { return NetworkLockBungee.this.doctor(); }
                 public List<String> reload() { return core.reload(); }
-                public String version() { return getDescription().getVersion(); }
+                public UpdateChecker updates() { return updates; }
+                public boolean notifyEnabled() { return core.notifyEnabled(); }
+                public int servers() { return getProxy().getServers().size(); }
             });
         }
 
@@ -178,8 +210,12 @@ public final class NetworkLockBungee extends Plugin implements Listener {
                     return s.hasPermission(node);
                 }
 
-                public void message(String key) {
-                    s.sendMessage(renderMini(core.messages().prefixed(key)));
+                public String text(String key) {
+                    return core.messages().get(key);
+                }
+
+                public void send(String formatted) {
+                    s.sendMessage(renderMini(formatted));
                 }
 
                 public void lines(List<String> lines) {

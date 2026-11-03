@@ -10,5 +10,24 @@ authentication:
   #  - id: "proxy-1"
   #    keys: ["paste the proxy key here"]
 
+# Optional: what refused players see. Also shown by queue plugins like ajQueue.
+# Leave these out to use the default text, which the proxy replaces with its messages.yml.
+# messages:
+#   authentication-failed: "&cPlease join through the network."
+#   authentication-timeout: "&cYour connection timed out. Please reconnect."
+#   security-error: "&cThis server is not accepting players right now."
+
+commands:
+  name: "networklock"      # restart the server after changing these
+  aliases: ["nlock"]
+
+updates:
+  check: true              # look for new versions on GitHub
+
+metrics:
+  # Counts this server in the public "servers protected by NetworkLock" number, once a day.
+  # Sends only an anonymous ID, the plugin version and the platform. Set to false to opt out.
+  enabled: true
+
 logging:
   debug: false

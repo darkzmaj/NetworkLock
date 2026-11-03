@@ -7,7 +7,8 @@ import dev.korinetwork.networklock.core.BackendCore;
 import dev.korinetwork.networklock.core.ForwardingToken;
 import dev.korinetwork.networklock.core.Outcome;
 import dev.korinetwork.networklock.core.PlayerIdentity;
-import net.kyori.adventure.text.Component;
+import dev.korinetwork.networklock.core.MiniText;
+import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
@@ -27,6 +28,9 @@ import java.util.logging.Logger;
  * properties in the pre-login profile in both modes.
  */
 final class PaperLoginListener implements Listener {
+
+    private static final LegacyComponentSerializer LEGACY = LegacyComponentSerializer.builder()
+            .character('§').hexColors().useUnusualXRepeatedCharacterHexFormat().build();
 
     private final BackendCore core;
     private final Logger logger;
@@ -90,7 +94,7 @@ final class PaperLoginListener implements Listener {
         }
     }
 
-    private static void deny(AsyncPlayerPreLoginEvent e, Outcome outcome) {
-        e.disallow(AsyncPlayerPreLoginEvent.Result.KICK_OTHER, Component.text(outcome.code().backendMessage()));
+    private void deny(AsyncPlayerPreLoginEvent e, Outcome outcome) {
+        e.disallow(AsyncPlayerPreLoginEvent.Result.KICK_OTHER, LEGACY.deserialize(MiniText.anyToLegacy(core.kickText(outcome))));
     }
 }

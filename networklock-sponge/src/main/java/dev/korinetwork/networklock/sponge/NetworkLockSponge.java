@@ -6,6 +6,13 @@ import dev.korinetwork.networklock.core.BackendCore;
 import dev.korinetwork.networklock.core.Commands;
 import dev.korinetwork.networklock.core.ForwardingToken;
 import dev.korinetwork.networklock.core.Log;
+import dev.korinetwork.networklock.core.MiniText;
+import dev.korinetwork.networklock.core.UpdateChecker;
+import dev.korinetwork.networklock.core.UsageStats;
+import dev.korinetwork.networklock.core.config.ConfigFiles;
+import dev.korinetwork.networklock.core.config.Settings;
+import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
+import org.spongepowered.api.event.lifecycle.StoppingEngineEvent;
 import dev.korinetwork.networklock.core.Outcome;
 import dev.korinetwork.networklock.core.PlayerIdentity;
 import net.kyori.adventure.text.Component;
@@ -50,27 +57,40 @@ public final class NetworkLockSponge {
     private static final Pattern FORWARDING_MODULE = Pattern.compile("(?m)^\\s*ip-forwarding\\s*=\\s*(\\w+)");
     private static final Pattern FORWARDING_MODE = Pattern.compile("(?s)ip-forwarding\\s*\\{.*?\\bmode\\s*=\\s*\"?(\\w+)");
 
+    private static final LegacyComponentSerializer LEGACY = LegacyComponentSerializer.builder()
+            .character(LegacyComponentSerializer.SECTION_CHAR).hexColors().useUnusualXRepeatedCharacterHexFormat().build();
+
     private final PluginContainer container;
     private final Logger logger;
     private final BackendCore core;
     /** Denials decided first, re-applied last in case another plugin un-cancelled the login. */
     private final Map<ServerSideConnectionEvent.Auth, Outcome> denied = Collections.synchronizedMap(new WeakHashMap<>());
 
+    private final Path dataDir;
+    private final UpdateChecker updates;
+    private final UsageStats stats;
+
     @Inject
     public NetworkLockSponge(PluginContainer container, Logger logger, @ConfigDir(sharedRoot = false) Path dataDir) {
         this.container = container;
         this.logger = logger;
-        this.core = new BackendCore(dataDir, new Log() {
+        this.dataDir = dataDir;
+        Log log = new Log() {
             public void info(String m) { logger.info(m); }
             public void warn(String m) { logger.warn(m); }
             public void error(String m) { logger.error(m); }
-        }, System::currentTimeMillis, System.getenv());
+        };
+        this.core = new BackendCore(dataDir, log, System::currentTimeMillis, System.getenv());
+        this.updates = new UpdateChecker(container.metadata().version().toString(), log, core::updatesEnabled);
+        this.stats = new UsageStats(container.metadata().version().toString(), "sponge", "server", core::usageId, core::metricsEnabled);
     }
 
     @Listener
     public void onConstruct(ConstructPluginEvent event) {
         try {
             core.start();
+            updates.start();
+            stats.start();
             for (String line : doctor()) {
                 if (!line.startsWith("OK")) logger.warn("doctor: {}", line);
             }
@@ -80,8 +100,15 @@ public final class NetworkLockSponge {
     }
 
     @Listener
+    public void onStopping(StoppingEngineEvent<?> event) {
+        updates.stop();
+        stats.stop();
+    }
+
+    @Listener
     public void onRegisterCommands(RegisterCommandEvent<Command.Raw> event) {
-        event.register(container, new NetworkLockCommand(), "networklock", "nlock");
+        Settings.CommandNames names = Settings.CommandNames.read(dataDir.resolve(ConfigFiles.CONFIG));
+        event.register(container, new NetworkLockCommand(names.name()), names.name(), names.aliases().toArray(new String[0]));
     }
 
     @Listener(order = Order.FIRST)
@@ -120,8 +147,8 @@ public final class NetworkLockSponge {
         }
     }
 
-    private static void deny(ServerSideConnectionEvent.Auth event, Outcome outcome) {
-        event.setMessage(Component.text(outcome.code().backendMessage()));
+    private void deny(ServerSideConnectionEvent.Auth event, Outcome outcome) {
+        event.setMessage(LEGACY.deserialize(MiniText.anyToLegacy(core.kickText(outcome))));
         event.setCancelled(true);
     }
 
@@ -147,9 +174,15 @@ public final class NetworkLockSponge {
 
     private final class NetworkLockCommand implements Command.Raw {
 
+        private final String label;
+
+        NetworkLockCommand(String label) {
+            this.label = label;
+        }
+
         @Override
         public CommandResult process(CommandCause cause, ArgumentReader.Mutable arguments) {
-            Commands.dispatch(args(arguments), sender(cause), new Commands.Target() {
+            Commands.dispatch(label, args(arguments), sender(cause), new Commands.Target() {
                 public List<String> status() {
                     List<String> l = new ArrayList<>(core.statusLines());
                     l.add("Platform: Sponge");
@@ -159,7 +192,9 @@ public final class NetworkLockSponge {
                 public List<String> proxies() { return core.proxiesLines(); }
                 public List<String> doctor() { return NetworkLockSponge.this.doctor(); }
                 public List<String> reload() { return core.reload(); }
-                public String version() { return container.metadata().version().toString(); }
+                public UpdateChecker updates() { return updates; }
+                public boolean notifyEnabled() { return false; } // join notices are a proxy feature
+                public int servers() { return core.trustedProxyCount(); }
             });
             return CommandResult.success();
         }
@@ -186,7 +221,7 @@ public final class NetworkLockSponge {
 
         @Override
         public Component usage(CommandCause cause) {
-            return Component.text("/networklock [help|status|reload|doctor|stats|proxies|version]");
+            return Component.text("/" + label + " [help|about|status|reload|doctor|stats|proxies]");
         }
 
         private String[] args(ArgumentReader.Mutable arguments) {
@@ -200,12 +235,18 @@ public final class NetworkLockSponge {
                     return cause.hasPermission(node);
                 }
 
-                public void message(String key) {
-                    cause.audience().sendMessage(Component.text("[NetworkLock] " + Commands.builtIn(key)));
+                public String text(String key) {
+                    return Commands.builtIn(key);
+                }
+
+                public void send(String formatted) {
+                    cause.audience().sendMessage(LEGACY.deserialize(MiniText.anyToLegacy(formatted)));
                 }
 
                 public void lines(List<String> lines) {
-                    for (String l : lines) cause.audience().sendMessage(Component.text("[NetworkLock] " + l));
+                    for (String l : lines) {
+                        cause.audience().sendMessage(LEGACY.deserialize(MiniText.anyToLegacy(Commands.builtIn("prefix")) + l));
+                    }
                 }
             };
         }

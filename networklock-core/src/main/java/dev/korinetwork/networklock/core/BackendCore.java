@@ -23,6 +23,9 @@ public final class BackendCore {
 
     private record Active(Settings.Backend settings, NonceCache nonces) {}
 
+    /** An outcome plus a plain-language explanation for the console. Never shown to players. */
+    private record Decision(Outcome outcome, String detail) {}
+
     private final Path dataDir;
     private final Log log;
     private final SecurityLog securityLog;
@@ -97,13 +100,14 @@ public final class BackendCore {
      * property in the forwarded profile; {@code identity.properties()} must exclude them.
      */
     public Outcome verify(PlayerIdentity identity, List<String> tokens) {
-        Outcome outcome;
+        Decision decision;
         try {
-            outcome = decide(identity, tokens);
+            decision = decide(identity, tokens);
         } catch (RuntimeException e) {
             log.error("Internal error while verifying a login (denied): " + e.getClass().getName());
-            outcome = Outcome.INTERNAL_ERROR;
+            decision = new Decision(Outcome.INTERNAL_ERROR, "internal error, see the line above");
         }
+        Outcome outcome = decision.outcome();
         outcomes.get(outcome).increment();
         Active a = active;
         boolean redact = a != null && a.settings().logging().redactAddresses();
@@ -113,40 +117,94 @@ public final class BackendCore {
                         + identity.properties().stream().map(PlayerIdentity.Property::name).toList());
             }
         } else if (a == null || a.settings().logging().securityEvents()) {
-            Outcome o = outcome;
+            Decision d = decision;
             securityLog.event(() -> "Denied login name=" + identity.name() + " uuid=" + identity.uuid()
-                    + " address=" + SecurityLog.address(identity.address(), redact) + " reason=" + o, clock.getAsLong());
+                    + " address=" + SecurityLog.address(identity.address(), redact) + " reason=" + d.outcome()
+                    + ": " + d.detail(), clock.getAsLong());
         }
         return outcome;
     }
 
-    private Outcome decide(PlayerIdentity identity, List<String> tokens) {
+    private Decision decide(PlayerIdentity identity, List<String> tokens) {
         Active a = active;
-        if (a == null || platformProblem != null) return Outcome.LOCKDOWN;
-        if (tokens.isEmpty()) return Outcome.MISSING;
-        if (tokens.size() > 1) return Outcome.MULTIPLE;
+        if (a == null || platformProblem != null) {
+            return new Decision(Outcome.LOCKDOWN, "this server is in lockdown (" + lockdownText()
+                    + "). Fix config.yml and run /networklock reload");
+        }
+        if (tokens.isEmpty()) {
+            return new Decision(Outcome.MISSING, "no NetworkLock signature. The player did not come through a proxy"
+                    + " running NetworkLock, or player forwarding is off on the proxy or this server");
+        }
+        if (tokens.size() > 1) return new Decision(Outcome.MULTIPLE, "more than one signature in the profile");
         ForwardingToken.Parsed t;
         try {
             t = ForwardingToken.parse(tokens.get(0));
         } catch (RuntimeException e) {
-            return Outcome.MALFORMED;
+            return new Decision(Outcome.MALFORMED, "the signature could not be read");
         }
         Settings.TrustedProxy proxy = a.settings().proxies().get(t.proxyId());
-        if (proxy == null) return Outcome.UNKNOWN_PROXY;
-        if (!ForwardingToken.macMatches(t, proxy.keys(), identity)) return Outcome.BAD_SIGNATURE;
+        if (proxy == null) {
+            return new Decision(Outcome.UNKNOWN_PROXY, "signed by proxy '" + t.proxyId()
+                    + "', which is not in authentication.trusted-proxies");
+        }
+        if (!ForwardingToken.macMatches(t, proxy.keys(), identity)) {
+            return new Decision(Outcome.BAD_SIGNATURE, "the signature does not match the key set for proxy '" + t.proxyId()
+                    + "'. Copy security.key from that proxy again and compare /networklock proxies on both sides");
+        }
         // only authenticated fields are examined below
-        if (!t.target().equals(a.settings().serverId())) return Outcome.WRONG_TARGET;
+        if (!t.target().equals(a.settings().serverId())) {
+            return new Decision(Outcome.WRONG_TARGET, "signed for server '" + t.target() + "', but this server's"
+                    + " network.server-id is '" + a.settings().serverId() + "'. They must match the server name in the proxy config");
+        }
         long now = clock.getAsLong();
         long age = now - t.issuedAtMillis();
         maxObservedSkew.accumulateAndGet(Math.max(0, -age), Math::max);
-        if (age > a.settings().maxAgeMillis()) return Outcome.EXPIRED;
-        if (-age > a.settings().skewMillis()) return Outcome.NOT_YET_VALID;
+        if (age > a.settings().maxAgeMillis()) {
+            return new Decision(Outcome.EXPIRED, "the signature is " + age / 1000 + "s old (limit "
+                    + a.settings().maxAgeMillis() / 1000 + "s). Check that the server clocks are in sync");
+        }
+        if (-age > a.settings().skewMillis()) {
+            return new Decision(Outcome.NOT_YET_VALID, "the proxy's clock is " + (-age) / 1000
+                    + "s ahead of this server. Sync the server clocks");
+        }
         long expiry = t.issuedAtMillis() + a.settings().maxAgeMillis() + a.settings().skewMillis();
         return switch (a.nonces().use(t.nonce(), expiry, now)) {
-            case FRESH -> Outcome.OK;
-            case REPLAY -> Outcome.REPLAYED;
-            case FULL -> Outcome.REPLAY_CACHE_FULL;
+            case FRESH -> new Decision(Outcome.OK, "");
+            case REPLAY -> new Decision(Outcome.REPLAYED, "this signature was already used once");
+            case FULL -> new Decision(Outcome.REPLAY_CACHE_FULL, "the replay cache is full; raise authentication.replay-cache-max-entries");
         };
+    }
+
+    /** The kick text for a denied login: the server's own messages.* entry, or the built-in text. */
+    public String kickText(Outcome outcome) {
+        Active a = active;
+        String custom = a == null ? null : a.settings().kickMessages().get(outcome.code().messageKey());
+        return custom != null ? custom : outcome.code().backendMessage();
+    }
+
+    /** Whether update checks are on; true while no config is loaded. */
+    public boolean updatesEnabled() {
+        Active a = active;
+        return a == null || a.settings().updates().check();
+    }
+
+    public boolean metricsEnabled() {
+        Active a = active;
+        return a != null && a.settings().updates().metrics();
+    }
+
+    /** Anonymous ID for the usage counter, derived one-way from server-id and key fingerprints; null in lockdown. */
+    public String usageId() {
+        Active a = active;
+        if (a == null) return null;
+        List<String> parts = new ArrayList<>(List.of("server", a.settings().serverId()));
+        a.settings().proxies().keySet().stream().sorted().forEach(p -> parts.addAll(a.settings().fingerprints(p)));
+        return UsageStats.anonymousId(parts.toArray(new String[0]));
+    }
+
+    public int trustedProxyCount() {
+        Active a = active;
+        return a == null ? 0 : a.settings().proxies().size();
     }
 
     public boolean inLockdown() {

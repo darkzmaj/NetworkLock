@@ -3,7 +3,7 @@
 #
 # Downloads official, checksum-verified Paper / Velocity / Waterfall builds, installs the
 # same NetworkLock.jar on all of them and asserts the outcome of direct attacks and proxy
-# joins. Needs: bash, curl, sha256sum, openssl, Java 21 on PATH, ports 25566 and 25600-25601
+# joins. Needs: bash, curl, sha256sum, openssl, Java 21 on PATH, ports 35566 and 35600-35601
 # free. Run from the repository root after `./gradlew shadowJar`.
 #
 #   it/run-integration.sh            # Paper 1.21.11 + Velocity 3.5.1 + Waterfall 1.21
@@ -81,7 +81,7 @@ mkdir -p "$B/plugins/NetworkLock" "$B/config" "$V/plugins/networklock" "$W/plugi
 for d in "$B" "$V" "$W"; do cp "$JAR" "$d/plugins/"; done
 
 echo "eula=true" > "$B/eula.txt"
-printf 'online-mode=false\nserver-ip=127.0.0.1\nserver-port=25566\nlevel-type=minecraft\\:flat\ngenerate-structures=false\nview-distance=2\nsimulation-distance=2\nwhite-list=false\n' > "$B/server.properties"
+printf 'online-mode=false\nserver-ip=127.0.0.1\nserver-port=35566\nlevel-type=minecraft\\:flat\ngenerate-structures=false\nview-distance=2\nsimulation-distance=2\nwhite-list=false\n' > "$B/server.properties"
 printf 'settings:\n  bungeecord: true\n' > "$B/spigot.yml"
 cat > "$B/plugins/NetworkLock/config.yml" <<EOF
 network:
@@ -104,12 +104,12 @@ security:
 EOF
 cat > "$V/velocity.toml" <<EOF
 config-version = "2.7"
-bind = "127.0.0.1:25600"
+bind = "127.0.0.1:35600"
 online-mode = false
 player-info-forwarding-mode = "$VELOCITY_MODE"
 login-ratelimit = 0
 [servers]
-lobby = "127.0.0.1:25566"
+lobby = "127.0.0.1:35566"
 try = ["lobby"]
 [forced-hosts]
 EOF
@@ -126,10 +126,10 @@ ip_forward: true
 connection_throttle: -1
 servers:
   lobby:
-    address: 127.0.0.1:25566
+    address: 127.0.0.1:35566
     restricted: false
 listeners:
-- host: 127.0.0.1:25601
+- host: 127.0.0.1:35601
   priorities:
   - lobby
   query_enabled: false
@@ -142,29 +142,29 @@ export NL_IT_KEY="$KW" # read by Waterfall's NetworkLock through key: "env:NL_IT
 start "$W" "$WF_JAR" "Listening on" || exit 1
 
 CP="$(native "$WORK/probe")$SEP$(native "$ROOT/networklock-core/build/classes/java/main")"
-PROTO=$(java -cp "$CP" Probe 127.0.0.1 25566 x protocol)
+PROTO=$(java -cp "$CP" Probe 127.0.0.1 35566 x protocol)
 probe() { java -Dproto="$PROTO" -cp "$CP" Probe "$@" | tr '\n' ' ' | sed 's/ *$//'; }
 U=069a79f4-44e9-4726-a5be-fca90e38aaf5
 
 echo "== direct attacks on the backend (protocol $PROTO)"
-check "forged UUID without token"        "REJECTED"  "$(probe 127.0.0.1 25566 Notch forged $U)"
-check "junk token"                       "REJECTED"  "$(probe 127.0.0.1 25566 Notch garbage $U)"
-check "token for another server"         "REJECTED"  "$(probe 127.0.0.1 25566 Notch token $U velocity-1 "$KV" survival 127.0.0.1)"
-check "token claiming the other proxy"   "REJECTED"  "$(probe 127.0.0.1 25566 Notch token $U waterfall-1 "$KV" lobby 127.0.0.1)"
-check "unknown proxy id"                 "REJECTED"  "$(probe 127.0.0.1 25566 Notch token $U proxy-9 "$KV" lobby 127.0.0.1)"
-R=$(probe 127.0.0.1 25566 Notch token $U velocity-1 "$KV" lobby 127.0.0.1 replay)
+check "forged UUID without token"        "REJECTED"  "$(probe 127.0.0.1 35566 Notch forged $U)"
+check "junk token"                       "REJECTED"  "$(probe 127.0.0.1 35566 Notch garbage $U)"
+check "token for another server"         "REJECTED"  "$(probe 127.0.0.1 35566 Notch token $U velocity-1 "$KV" survival 127.0.0.1)"
+check "token claiming the other proxy"   "REJECTED"  "$(probe 127.0.0.1 35566 Notch token $U waterfall-1 "$KV" lobby 127.0.0.1)"
+check "unknown proxy id"                 "REJECTED"  "$(probe 127.0.0.1 35566 Notch token $U proxy-9 "$KV" lobby 127.0.0.1)"
+R=$(probe 127.0.0.1 35566 Notch token $U velocity-1 "$KV" lobby 127.0.0.1 replay)
 check "valid token accepted"             "ACCEPTED"  "$R"
 [[ "$R" == *"replay: REJECTED"*"NL-04"* ]] && echo "PASS  replayed token rejected (NL-04)" || { echo "FAIL  replay: $R"; FAILED=1; }
 
 echo "== joins through proxies"
-check "join via Velocity (legacy)"       "ACCEPTED"  "$(probe 127.0.0.1 25600 ViaVelocity plain)"
+check "join via Velocity (legacy)"       "ACCEPTED"  "$(probe 127.0.0.1 35600 ViaVelocity plain)"
 logged "backend verified Velocity join"  "$B/console.log" "Accepted ViaVelocity"
-check "join via Waterfall (env key)"     "ACCEPTED"  "$(probe 127.0.0.1 25601 ViaWaterfall plain)"
+check "join via Waterfall (env key)"     "ACCEPTED"  "$(probe 127.0.0.1 35601 ViaWaterfall plain)"
 logged "backend verified Waterfall join" "$B/console.log" "Accepted ViaWaterfall"
 
 echo "== proxy translates backend rejections"
 sed -i 's/server-id: "lobby"/server-id: "renamed"/' "$B/plugins/NetworkLock/config.yml"; send "$B" "nlock reload"; sleep 3
-R=$(probe 127.0.0.1 25600 Mismatch plain)
+R=$(probe 127.0.0.1 35600 Mismatch plain)
 check "mismatched server-id rejected via proxy" "REJECTED (configuration)" "$R"
 [[ "$R" == *"color red"*"Connection authentication failed"* && "$R" != *"&c"* ]] \
     && echo "PASS  player saw the proxy's messages.yml text, &c rendered as red" \
@@ -173,7 +173,7 @@ check "mismatched server-id rejected via proxy" "REJECTED (configuration)" "$R"
 echo "== reload safety"
 printf 'network: [broken\n' > "$B/plugins/NetworkLock/config.yml"; send "$B" "nlock reload"; sleep 3
 logged "invalid reload rejected"         "$B/console.log" "Reload failed"
-check "still enforcing after bad reload" "REJECTED"  "$(probe 127.0.0.1 25566 Notch forged $U)"
+check "still enforcing after bad reload" "REJECTED"  "$(probe 127.0.0.1 35566 Notch forged $U)"
 
 if [ "$FAILED" = 0 ]; then echo "== ALL PASSED"; else echo "== FAILURES (logs in $WORK/srv)"; fi
 exit "$FAILED"

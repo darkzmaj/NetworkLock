@@ -4,7 +4,9 @@ import com.google.inject.Inject;
 import com.velocitypowered.api.command.SimpleCommand;
 import com.velocitypowered.api.event.Subscribe;
 import com.velocitypowered.api.event.connection.LoginEvent;
+import com.velocitypowered.api.event.connection.PostLoginEvent;
 import com.velocitypowered.api.event.connection.PreLoginEvent;
+import com.velocitypowered.api.event.proxy.ProxyShutdownEvent;
 import com.velocitypowered.api.event.player.KickedFromServerEvent;
 import com.velocitypowered.api.event.player.ServerConnectedEvent;
 import com.velocitypowered.api.event.player.ServerPreConnectEvent;
@@ -21,7 +23,13 @@ import dev.korinetwork.networklock.core.Log;
 import dev.korinetwork.networklock.core.MiniText;
 import dev.korinetwork.networklock.core.PlayerIdentity;
 import dev.korinetwork.networklock.core.ProxyCore;
+import dev.korinetwork.networklock.core.UpdateChecker;
+import dev.korinetwork.networklock.core.UsageStats;
+import dev.korinetwork.networklock.core.config.ConfigFiles;
+import dev.korinetwork.networklock.core.config.Settings;
 import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.TextReplacementConfig;
+import net.kyori.adventure.text.event.ClickEvent;
 import net.kyori.adventure.text.minimessage.MiniMessage;
 import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer;
 import org.slf4j.Logger;
@@ -39,29 +47,62 @@ public final class NetworkLockVelocity {
 
     private static final Pattern FORWARDING_MODE = Pattern.compile("(?m)^\\s*player-info-forwarding-mode\\s*=\\s*\"(\\w+)\"");
 
+    private static final Pattern URL = Pattern.compile("https?://\\S+");
+
     private final ProxyServer proxy;
     private final Logger logger;
+    private final Path dataDir;
+    private final Log log;
     private final ProxyCore core;
+    private UpdateChecker updates;
+    private UsageStats stats;
+    private String label = Settings.CommandNames.DEFAULT.name();
 
     @Inject
     public NetworkLockVelocity(ProxyServer proxy, Logger logger, @DataDirectory Path dataDir) {
         this.proxy = proxy;
         this.logger = logger;
-        this.core = new ProxyCore(dataDir, new Log() {
+        this.dataDir = dataDir;
+        this.log = new Log() {
             public void info(String m) { logger.info(m); }
             public void warn(String m) { logger.warn(m); }
             public void error(String m) { logger.error(m); }
-        }, System::currentTimeMillis, System.getenv());
+        };
+        this.core = new ProxyCore(dataDir, log, System::currentTimeMillis, System.getenv());
     }
 
     @Subscribe
     public void onInitialize(ProxyInitializeEvent event) {
         core.start();
-        proxy.getCommandManager().register(
-                proxy.getCommandManager().metaBuilder("networklock").aliases("nlock").plugin(this).build(), new Command());
+        String version = proxy.getPluginManager().fromInstance(this)
+                .flatMap(c -> c.getDescription().getVersion()).orElse("unknown");
+        updates = new UpdateChecker(version, log, core::updatesEnabled);
+        updates.start();
+        stats = new UsageStats(version, "velocity", "proxy", core::usageId, core::metricsEnabled);
+        stats.start();
+        Settings.CommandNames names = Settings.CommandNames.read(dataDir.resolve(ConfigFiles.CONFIG));
+        label = names.name();
+        proxy.getCommandManager().register(proxy.getCommandManager().metaBuilder(names.name())
+                .aliases(names.aliases().toArray(new String[0])).plugin(this).build(), new Command());
         for (String line : doctor()) {
             if (!line.startsWith("OK")) logger.warn("doctor: {}", line);
         }
+    }
+
+    @Subscribe
+    public void onShutdown(ProxyShutdownEvent event) {
+        if (updates != null) updates.stop();
+        if (stats != null) stats.stop();
+    }
+
+    /** Tells staff about a newer version when they join. */
+    @Subscribe
+    public void onPostLogin(PostLoginEvent e) {
+        Player p = e.getPlayer();
+        if (updates == null || !core.notifyEnabled()) return;
+        if (!p.hasPermission(Commands.NOTIFY_PERMISSION) && !p.hasPermission(Commands.ADMIN_PERMISSION)) return;
+        String notice = Commands.updateNotice(core.messages().get("update-available"), updates);
+        if (notice != null) p.sendMessage(text(notice));
     }
 
     @Subscribe(priority = Short.MAX_VALUE)
@@ -138,9 +179,11 @@ public final class NetworkLockVelocity {
         return text(core.messages().get(key));
     }
 
-    /** {@code &}-codes (the default style) and MiniMessage tags both work. */
+    /** {@code &}-codes (the default style) and MiniMessage tags both work; plain links become clickable. */
     private static Component text(String message) {
-        return MiniMessage.miniMessage().deserialize(MiniText.ampersandToMini(message));
+        return MiniMessage.miniMessage().deserialize(MiniText.ampersandToMini(message))
+                .replaceText(TextReplacementConfig.builder().match(URL)
+                        .replacement(b -> b.clickEvent(ClickEvent.openUrl(b.content()))).build());
     }
 
     private List<String> doctor() {
@@ -164,7 +207,7 @@ public final class NetworkLockVelocity {
     private final class Command implements SimpleCommand {
         @Override
         public void execute(Invocation inv) {
-            Commands.dispatch(inv.arguments(), sender(inv), new Commands.Target() {
+            Commands.dispatch(label, inv.arguments(), sender(inv), new Commands.Target() {
                 public List<String> status() {
                     List<String> l = new ArrayList<>(core.statusLines());
                     l.add("Platform: " + proxy.getVersion().getName() + " " + proxy.getVersion().getVersion());
@@ -174,10 +217,9 @@ public final class NetworkLockVelocity {
                 public List<String> proxies() { return core.proxiesLines(); }
                 public List<String> doctor() { return NetworkLockVelocity.this.doctor(); }
                 public List<String> reload() { return core.reload(); }
-                public String version() {
-                    return proxy.getPluginManager().fromInstance(NetworkLockVelocity.this)
-                            .flatMap(c -> c.getDescription().getVersion()).orElse("unknown");
-                }
+                public UpdateChecker updates() { return updates; }
+                public boolean notifyEnabled() { return core.notifyEnabled(); }
+                public int servers() { return proxy.getAllServers().size(); }
             });
         }
 
@@ -192,12 +234,16 @@ public final class NetworkLockVelocity {
                     return inv.source().hasPermission(node);
                 }
 
-                public void message(String key) {
-                    inv.source().sendMessage(text(core.messages().prefixed(key)));
+                public String text(String key) {
+                    return core.messages().get(key);
+                }
+
+                public void send(String formatted) {
+                    inv.source().sendMessage(NetworkLockVelocity.text(formatted));
                 }
 
                 public void lines(List<String> lines) {
-                    Component prefix = text(core.messages().get("prefix"));
+                    Component prefix = NetworkLockVelocity.text(core.messages().get("prefix"));
                     for (String l : lines) inv.source().sendMessage(prefix.append(Component.text(l)));
                 }
             };

@@ -8,12 +8,6 @@ description: Makes players join your servers only through your proxy.
 website: https://kori.my
 authors: [DarkZmaj]
 
-commands:
-  networklock:
-    description: NetworkLock administration.
-    usage: /<command> [help|status|reload|doctor|stats|proxies|version]
-    aliases: [nlock]
-
 permissions:
   networklock.admin:
     description: All NetworkLock commands.
@@ -25,7 +19,8 @@ permissions:
       networklock.command.doctor: true
       networklock.command.stats: true
       networklock.command.proxies: true
-      networklock.command.version: true
+      networklock.command.about: true
+      networklock.notify: true
   networklock.command.help:
     default: op
   networklock.command.status:
@@ -38,5 +33,8 @@ permissions:
     default: op
   networklock.command.proxies:
     default: op
-  networklock.command.version:
+  networklock.command.about:
+    default: op
+  networklock.notify:
+    description: Get told about new NetworkLock versions on join (proxy).
     default: op

@@ -75,6 +75,28 @@ public final class ConfigTree {
         return String.valueOf(v);
     }
 
+    /** A message: a single string, or a list of strings joined into lines. Null when absent. */
+    public String text(String path, String def) {
+        Object v = raw(path);
+        if (v == null) return def;
+        String s;
+        if (v instanceof List<?> lines) {
+            List<String> parts = new ArrayList<>();
+            for (Object line : lines) parts.add(String.valueOf(line));
+            s = String.join("\n", parts);
+        } else if (v instanceof Map) {
+            error(path, "must be text or a list of lines");
+            return def;
+        } else {
+            s = String.valueOf(v);
+        }
+        if (s.length() > 2048) {
+            error(path, "is too long (max 2048 characters)");
+            return def;
+        }
+        return s;
+    }
+
     public boolean bool(String path, boolean def) {
         Object v = raw(path);
         if (v == null) return def;

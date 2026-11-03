@@ -203,21 +203,123 @@ class SupportTest {
         List<String> seen = new java.util.ArrayList<>();
         Commands.Sender limited = new Commands.Sender() {
             public boolean hasPermission(String n) { return n.equals("networklock.command.status"); }
-            public void message(String key) { seen.add("msg:" + key); }
+            public String text(String key) { return key.equals("prefix") ? "" : "msg:" + key; }
+            public void send(String formatted) { seen.add(formatted); }
             public void lines(List<String> l) { seen.addAll(l); }
         };
-        Commands.Target target = new Commands.Target() {
+        Commands.Target target = target(new UpdateChecker("1.0.1", quiet, () -> false));
+        Commands.dispatch("nlock", new String[]{"reload"}, limited, target);
+        Commands.dispatch("nlock", new String[]{"status"}, limited, target);
+        Commands.dispatch("nlock", new String[]{"nope"}, limited, target);
+        Commands.dispatch("nlock", new String[]{"version"}, limited, target);
+        assertEquals(List.of("msg:no-permission", "status!", "msg:invalid-command", "msg:no-permission"), seen);
+        assertEquals(List.of("status"), Commands.complete(new String[]{""}, limited));
+    }
+
+    Commands.Target target(UpdateChecker updates) {
+        return new Commands.Target() {
             public List<String> status() { return List.of("status!"); }
             public List<String> stats() { return List.of(); }
             public List<String> proxies() { return List.of(); }
             public List<String> doctor() { return List.of(); }
             public List<String> reload() { throw new AssertionError("must not reload"); }
-            public String version() { return "1"; }
+            public UpdateChecker updates() { return updates; }
+            public boolean notifyEnabled() { return true; }
+            public int servers() { return 3; }
         };
-        Commands.dispatch(new String[]{"reload"}, limited, target);
-        Commands.dispatch(new String[]{"status"}, limited, target);
-        Commands.dispatch(new String[]{"nope"}, limited, target);
-        assertEquals(List.of("msg:no-permission", "status!", "msg:invalid-command"), seen);
-        assertEquals(List.of("status"), Commands.complete(new String[]{""}, limited));
+    }
+
+    @Test
+    void aboutAndUpdateNotice() {
+        Commands.Sender proxyLike = new Commands.Sender() {
+            public boolean hasPermission(String n) { return true; }
+            public String text(String key) { return dev.korinetwork.networklock.core.config.Messages.defaults().get(key); }
+            public void send(String formatted) {}
+            public void lines(List<String> l) {}
+        };
+        UpdateChecker unknown = new UpdateChecker("1.0.1-dev", quiet, () -> false);
+        String about = Commands.about(proxyLike, target(unknown));
+        assertTrue(about.contains("v1.0.1-dev") && about.contains("not checked") && about.contains("&f3") && about.contains("&fon"), about);
+        assertFalse(about.contains("%"), "every placeholder filled: " + about);
+        assertNull(Commands.updateNotice("x", unknown), "no notice without a known newer version");
+    }
+
+    @Test
+    void versionComparison() {
+        assertTrue(UpdateChecker.isNewer("1.0.1", "1.0.0"));
+        assertTrue(UpdateChecker.isNewer("1.1", "1.0.9"));
+        assertTrue(UpdateChecker.isNewer("1.0.1", "1.0.1-dev"), "a release beats its dev build");
+        assertFalse(UpdateChecker.isNewer("1.0.0", "1.0.1-dev"), "the 1.0.1 dev build is not outdated by 1.0.0");
+        assertFalse(UpdateChecker.isNewer("1.0.1", "1.0.1"));
+        assertFalse(UpdateChecker.isNewer("1.0.1-dev", "1.0.1"));
+        assertEquals("1.0.0", UpdateChecker.parseTag("{\"url\":\"x\",\"tag_name\": \"v1.0.0\",\"name\":\"NetworkLock\"}"));
+        assertNull(UpdateChecker.parseTag("{\"message\":\"Not Found\"}"));
+    }
+
+    @Test
+    void backendKickMessagesAndMultiLineMessages() throws Exception {
+        String key = Keys.generate();
+        Files.writeString(dir.resolve("config.yml"), "network:\n  server-id: lobby\nauthentication:\n  trusted-proxies:\n"
+                + "    - id: p\n      keys: [\"" + key + "\"]\nmessages:\n  authentication-failed:\n    - \"&cLine one\"\n    - \"&7Line two\"\n");
+        BackendCore core = new BackendCore(dir, quiet, now::get, Map.of());
+        assertTrue(core.start());
+        assertEquals("&cLine one\n&7Line two", core.kickText(Outcome.MISSING));
+        assertEquals(Outcome.RejectCode.EXPIRED.backendMessage(), core.kickText(Outcome.EXPIRED), "unset keys keep the built-in text");
+        Files.writeString(dir.resolve("messages.yml"), "messages:\n  about:\n    - \"a\"\n    - \"b\"\n");
+        assertEquals("a\nb", dev.korinetwork.networklock.core.config.Messages.load(dir.resolve("messages.yml")).get("about"));
+    }
+
+    @Test
+    void denialsExplainTheCauseInTheConsole() throws Exception {
+        String key = Keys.generate();
+        Files.writeString(dir.resolve("config.yml"), "network:\n  server-id: bloodysmp\nauthentication:\n  trusted-proxies:\n"
+                + "    - id: proxy-1\n      keys: [\"" + key + "\"]\n");
+        List<String> logged = new java.util.ArrayList<>();
+        Log capture = new Log() {
+            public void info(String m) { logged.add(m); }
+            public void warn(String m) { logged.add(m); }
+            public void error(String m) { logged.add(m); }
+        };
+        BackendCore core = new BackendCore(dir, capture, now::get, Map.of());
+        assertTrue(core.start());
+        PlayerIdentity id = new PlayerIdentity(UUID.randomUUID(), "ScoobyDoo_PL", "192.0.2.7", List.of());
+        core.verify(id, List.of(ForwardingToken.mint("proxy-1", Keys.decode(key), "smp", id, now.get())));
+        assertTrue(logged.stream().anyMatch(l -> l.contains("WRONG_TARGET") && l.contains("'smp'") && l.contains("'bloodysmp'")), logged.toString());
+        core.verify(id, List.of());
+        assertTrue(logged.stream().anyMatch(l -> l.contains("MISSING") && l.contains("forwarding")), logged.toString());
+        for (String line : logged) assertFalse(line.contains(key));
+    }
+
+    @Test
+    void usageStatsSendOnlyAnonymousData() throws Exception {
+        String key = Keys.generate();
+        Files.writeString(dir.resolve("config.yml"), "network:\n  server-id: lobby\nauthentication:\n  trusted-proxies:\n"
+                + "    - id: p\n      keys: [\"" + key + "\"]\n");
+        BackendCore core = new BackendCore(dir, quiet, now::get, Map.of());
+        assertTrue(core.start());
+        assertTrue(core.metricsEnabled(), "on by default");
+        String id = core.usageId();
+        assertEquals(32, id.length());
+        assertEquals(id, core.usageId(), "stable across calls and restarts");
+        UsageStats stats = new UsageStats("1.0.1-dev", "paper", "server", core::usageId, core::metricsEnabled);
+        String payload = stats.payload(id);
+        assertEquals("{\"id\":\"" + id + "\",\"version\":\"1.0.1-dev\",\"platform\":\"paper\",\"side\":\"server\"}", payload);
+        assertFalse(payload.contains("lobby") || payload.contains(key) || payload.contains(Keys.fingerprint(Keys.decode(key))));
+        Files.writeString(dir.resolve("config.yml"), Files.readString(dir.resolve("config.yml")) + "metrics:\n  enabled: false\n");
+        assertEquals(List.of(), core.reload());
+        assertFalse(core.metricsEnabled(), "switched off by reload, no restart needed");
+        assertTrue(UsageStats.ENDPOINT.getScheme().equals("https"), "pings are always encrypted");
+    }
+
+    @Test
+    void commandNamesFromConfig() throws Exception {
+        Files.writeString(dir.resolve("config.yml"), "commands:\n  name: \"NLadmin\"\n  aliases: [\"nl\", \"bad name!\", \"nladmin\"]\n");
+        dev.korinetwork.networklock.core.config.Settings.CommandNames n =
+                dev.korinetwork.networklock.core.config.Settings.CommandNames.read(dir.resolve("config.yml"));
+        assertEquals("nladmin", n.name());
+        assertEquals(List.of("nl"), n.aliases(), "invalid and duplicate aliases are dropped");
+        Files.writeString(dir.resolve("config.yml"), "this: [is broken");
+        assertEquals(dev.korinetwork.networklock.core.config.Settings.CommandNames.DEFAULT,
+                dev.korinetwork.networklock.core.config.Settings.CommandNames.read(dir.resolve("config.yml")));
     }
 }

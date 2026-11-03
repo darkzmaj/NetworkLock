@@ -25,6 +25,11 @@ Every proxy gets its own key. Run `/networklock proxies` on both sides to compar
 | `protection.temporary-blocks.enabled` | `true` | Block IPs that keep going over the limit. |
 | `protection.temporary-blocks.duration-seconds` | `60` | How long a block lasts. |
 | `protection.exempt` | `[]` | IPs or ranges that are never limited, for example `["10.0.0.0/8"]`. |
+| `commands.name` | `networklock` | Name of the command. Restart to apply. |
+| `commands.aliases` | `["nlock"]` | Other names for the command. Restart to apply. |
+| `updates.check` | `true` | Look for new versions on GitHub at startup and every 12 hours. |
+| `updates.notify` | `true` | Tell staff with `networklock.notify` about a new version when they join. |
+| `metrics.enabled` | `true` | Count this proxy in the public "servers protected" number. See [Usage statistics](#usage-statistics). |
 | `logging.debug` | `false` | Log every player the proxy signs. |
 
 Extra settings, not in the default file:
@@ -44,6 +49,12 @@ Extra settings, not in the default file:
 |---|---|---|
 | `network.server-id` | empty, must be set | This server's name in your proxy config, for example `lobby`. |
 | `authentication.trusted-proxies` | empty, must be set | The proxies allowed to send players here, each with `id` and `keys`. A key can also be `env:VARIABLE` or `file:/path`. |
+| `messages.authentication-failed` | not set | Optional text refused players see, instead of the default. See below. |
+| `messages.authentication-timeout` | not set | Same, for an expired signature. |
+| `messages.security-error` | not set | Same, when this server is locked down. |
+| `commands.name` / `commands.aliases` | `networklock` / `["nlock"]` | Command name and aliases. Restart to apply. |
+| `updates.check` | `true` | Look for new versions on GitHub. |
+| `metrics.enabled` | `true` | Count this server in the public "servers protected" number. |
 | `logging.debug` | `false` | Log every accepted player. |
 
 Extra settings, not in the default file:
@@ -68,9 +79,20 @@ Messages use `&` colour codes:
 
 MiniMessage tags like `<aqua>` also work, and you can mix them with `&` codes.
 
-The available messages are `prefix`, `no-permission`, `reloaded`, `reload-failed`, `invalid-command`, `authentication-failed`, `authentication-timeout`, `connection-limited`, `temporarily-blocked` and `security-error`. If one is missing from the file, the built-in text is used.
+The available messages are `prefix`, `no-permission`, `reloaded`, `reload-failed`, `invalid-command`, `authentication-failed`, `authentication-timeout`, `connection-limited`, `temporarily-blocked`, `security-error`, `about`, `status-latest`, `status-outdated`, `status-unknown` and `update-available`. If one is missing from the file, the built-in text is used.
 
-Game servers have no messages file. When a game server refuses a player, it sends a short fixed text with a code, and the proxy swaps it for your message:
+Any message can be a list of lines instead of one line:
+
+```yaml
+messages:
+  about:
+    - "&b&lNetworkLock &7v%version%"
+    - "&7Version: %status%"
+```
+
+Placeholders: `about` has `%version%`, `%status%`, `%notify%` and `%servers%`; `status-outdated` has `%latest%`; `update-available` has `%current%`, `%latest%` and `%link%`. Links become clickable.
+
+When a game server refuses a player, it sends a short default text with a code, and the proxy swaps it for your message:
 
 | Code | Reason | Message used |
 |---|---|---|
@@ -79,6 +101,37 @@ Game servers have no messages file. When a game server refuses a player, it send
 | NL-03 | Signature expired | `authentication-timeout` |
 | NL-04 | Signature was already used | `authentication-failed` |
 | NL-05 | Server is locked down or hit an internal error | `security-error` |
+
+Queue plugins like ajQueue send players with their own connection method, which the proxy can't intercept, so they show the game server's text as it is. To change what they show, set the same message keys under `messages:` in the game server's `config.yml`:
+
+```yaml
+messages:
+  authentication-failed:
+    - "&c&lMy Server"
+    - "&7Please join through &bplay.example.net"
+```
+
+When a game server has its own text, the proxy shows that text instead of its `messages.yml` one.
+
+## Finding out why a player was refused
+
+Every refused login is logged on the game server with the reason and what to do about it, for example:
+
+```
+Denied login name=Steve ... reason=WRONG_TARGET: signed for server 'smp', but this server's network.server-id is 'bloodysmp'. They must match the server name in the proxy config
+```
+
+`/networklock doctor` checks the whole setup.
+
+## Usage statistics
+
+With `metrics.enabled: true` (the default), each proxy and game server sends one small message a day over HTTPS, so we can show how many servers NetworkLock protects. It contains:
+
+- an anonymous ID: a one-way hash, so the same server is only counted once, and it can't be turned back into anything
+- the NetworkLock version
+- the platform (for example `velocity` or `paper`) and whether it is a proxy or a game server
+
+It never contains IP addresses, player names, server names or keys. Set `metrics.enabled: false` and run `/networklock reload` to turn it off.
 
 ## Changing a key without downtime
 

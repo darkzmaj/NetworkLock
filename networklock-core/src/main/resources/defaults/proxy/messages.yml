@@ -1,5 +1,6 @@
 # NetworkLock - messages
 # Colors: &0-&9 &a-&f, styles: &l &o &n &m &k &r, hex: &#ff8800. MiniMessage tags also work.
+# A message can be one line, or a list of lines.
 
 prefix: "&8[&bNetworkLock&8] "
 
@@ -13,3 +14,20 @@ messages:
   connection-limited: "&cToo many connection attempts. Please wait a moment."
   temporarily-blocked: "&cConnection temporarily restricted."
   security-error: "&cUnable to establish a secure connection. Please try again later."
+
+  # /networklock about. Placeholders: %version% %status% %notify% %servers%
+  about:
+    - "&b&lNetworkLock &7v%version%"
+    - "&7Version: %status%"
+    - "&7Update notify: &f%notify%"
+    - "&7Servers: &f%servers%"
+    - "&7Made by &fDarkZmaj &8| &7Support: &bhttps://kori.my"
+  status-latest: "&aLATEST"
+  status-outdated: "&cOUTDATED &7(newest: &f%latest%&7)"
+  status-unknown: "&7not checked"
+
+  # Sent to staff on join when a newer version exists. Placeholders: %current% %latest% %link%
+  update-available:
+    - "&eA new NetworkLock version is available!"
+    - "&7Current: &c%current% &7New: &a%latest%"
+    - "&7Download: &b%link%"

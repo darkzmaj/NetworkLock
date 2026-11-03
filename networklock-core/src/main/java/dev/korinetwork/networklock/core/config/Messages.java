@@ -25,6 +25,13 @@ public final class Messages {
         d.put("connection-limited", "&cToo many connection attempts. Please wait a moment.");
         d.put("temporarily-blocked", "&cConnection temporarily restricted.");
         d.put("security-error", "&cUnable to establish a secure connection. Please try again later.");
+        d.put("about", "&b&lNetworkLock &7v%version%\n&7Version: %status%\n&7Update notify: &f%notify%\n"
+                + "&7Servers: &f%servers%\n&7Made by &fDarkZmaj &8| &7Support: &bhttps://kori.my");
+        d.put("status-latest", "&aLATEST");
+        d.put("status-outdated", "&cOUTDATED &7(newest: &f%latest%&7)");
+        d.put("status-unknown", "&7not checked");
+        d.put("update-available", "&eA new NetworkLock version is available!\n&7Current: &c%current% &7New: &a%latest%\n"
+                + "&7Download: &b%link%");
         DEFAULTS = Map.copyOf(d);
     }
 
@@ -43,13 +50,8 @@ public final class Messages {
         Map<String, String> v = new LinkedHashMap<>(DEFAULTS);
         for (String key : DEFAULTS.keySet()) {
             String path = key.equals("prefix") ? "prefix" : "messages." + key;
-            String value = t.string(path, null);
-            if (value == null) continue;
-            if (value.length() > 1024) {
-                t.error(path, "is too long (max 1024 characters)");
-                continue;
-            }
-            v.put(key, value);
+            String value = t.text(path, null); // a list of lines is allowed for multi-line messages
+            if (value != null) v.put(key, value);
         }
         t.throwIfErrors();
         return new Messages(Map.copyOf(v));

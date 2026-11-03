@@ -26,7 +26,37 @@ public final class Settings {
         }
     }
 
-    public record Proxy(String networkId, byte[] key, ConnectionLimiter.Settings limiter, Logging logging) {
+    /** Update checks and the anonymous usage counter ({@code metrics.enabled}). */
+    public record Updates(boolean check, boolean notifyOnJoin, boolean metrics) {
+        static Updates read(ConfigTree t) {
+            return new Updates(t.bool("updates.check", true), t.bool("updates.notify", true), t.bool("metrics.enabled", true));
+        }
+    }
+
+    /** The command name and aliases. Read leniently so the command still works when the rest of the file is broken. */
+    public record CommandNames(String name, List<String> aliases) {
+        public static final CommandNames DEFAULT = new CommandNames("networklock", List.of("nlock"));
+        private static final java.util.regex.Pattern NAME = java.util.regex.Pattern.compile("[a-z0-9_-]{1,32}");
+
+        public static CommandNames read(Path file) {
+            try {
+                ConfigTree t = ConfigTree.load(file);
+                String name = t.string("commands.name", DEFAULT.name()).toLowerCase(java.util.Locale.ROOT);
+                if (!NAME.matcher(name).matches()) return DEFAULT;
+                List<String> aliases = new ArrayList<>();
+                Object raw = t.raw("commands.aliases");
+                for (Object a : raw instanceof List<?> l ? l : raw == null ? DEFAULT.aliases() : List.of()) {
+                    String alias = String.valueOf(a).toLowerCase(java.util.Locale.ROOT);
+                    if (NAME.matcher(alias).matches() && !alias.equals(name)) aliases.add(alias);
+                }
+                return new CommandNames(name, List.copyOf(aliases));
+            } catch (ConfigException | RuntimeException e) {
+                return DEFAULT;
+            }
+        }
+    }
+
+    public record Proxy(String networkId, byte[] key, ConnectionLimiter.Settings limiter, Logging logging, Updates updates) {
 
         public static Proxy load(Path file, Map<String, String> env) throws ConfigException {
             ConfigTree t = ConfigTree.load(file);
@@ -60,8 +90,9 @@ public final class Settings {
                     t.integer("protection.max-tracked-addresses", 100_000, 1_000, 10_000_000),
                     t.integer("protection.flood-warning-threshold", 200, 1, 1_000_000));
             Logging logging = Logging.read(t);
+            Updates updates = Updates.read(t);
             t.throwIfErrors();
-            return new Proxy(id, key, limiter, logging);
+            return new Proxy(id, key, limiter, logging, updates);
         }
 
         public String keyFingerprint() {
@@ -71,8 +102,12 @@ public final class Settings {
 
     public record TrustedProxy(String id, List<byte[]> keys) {}
 
+    /** Keys of the optional backend kick texts; the same names the proxy's messages.yml uses. */
+    public static final List<String> KICK_MESSAGE_KEYS = List.of("authentication-failed", "authentication-timeout", "security-error");
+
     public record Backend(String serverId, Map<String, TrustedProxy> proxies, long maxAgeMillis, long skewMillis,
-                          int replayCacheMax, Logging logging, List<String> warnings) {
+                          int replayCacheMax, Logging logging, List<String> warnings, Map<String, String> kickMessages,
+                          Updates updates) {
 
         public static Backend load(Path file, Map<String, String> env) throws ConfigException {
             ConfigTree t = ConfigTree.load(file);
@@ -126,9 +161,15 @@ public final class Settings {
             int skew = t.integer("authentication.max-clock-skew-seconds", 5, 0, 60);
             int cache = t.integer("authentication.replay-cache-max-entries", 100_000, 1_000, 10_000_000);
             Logging logging = Logging.read(t);
+            Map<String, String> kickMessages = new LinkedHashMap<>();
+            for (String k : KICK_MESSAGE_KEYS) {
+                String text = t.text("messages." + k, null);
+                if (text != null) kickMessages.put(k, text);
+            }
+            Updates updates = Updates.read(t);
             t.throwIfErrors();
             return new Backend(serverId, Map.copyOf(proxies), maxAge * 1000L, skew * 1000L, cache, logging,
-                    List.copyOf(warnings));
+                    List.copyOf(warnings), Map.copyOf(kickMessages), updates);
         }
 
         public List<String> fingerprints(String proxyId) {

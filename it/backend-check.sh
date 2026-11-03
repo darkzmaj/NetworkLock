@@ -7,7 +7,7 @@
 #
 # expect = "enforce" (default): forged logins rejected, valid token accepted once.
 # expect = "deny-all": every login rejected (servers without the Paper profile API, e.g. Spigot).
-# Needs bash, openssl, Java on PATH and port 25570 free. Run from the repository root.
+# Needs bash, openssl, Java on PATH and port 35570 free. Run from the repository root.
 set -uo pipefail
 
 SERVER_JAR=$(cd "$(dirname "$1")" && pwd)/$(basename "$1")
@@ -26,7 +26,7 @@ javac -d "$WORK/probe" -cp "$ROOT/networklock-core/build/classes/java/main" "$RO
 KEY=$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '=\n')
 cp "$ROOT/build/libs/NetworkLock.jar" "$PLUGINS/"
 echo "eula=true" > "$S/eula.txt"
-printf 'online-mode=false\nserver-ip=127.0.0.1\nserver-port=25570\nlevel-type=minecraft\\:flat\ngenerate-structures=false\nview-distance=2\nsimulation-distance=2\nwhite-list=false\n' > "$S/server.properties"
+printf 'online-mode=false\nserver-ip=127.0.0.1\nserver-port=35570\nlevel-type=minecraft\\:flat\ngenerate-structures=false\nview-distance=2\nsimulation-distance=2\nwhite-list=false\n' > "$S/server.properties"
 if [ "$SPONGE" = 1 ]; then
     mkdir -p "$S/config/sponge"
     printf 'modules {\n    ip-forwarding=true\n}\nip-forwarding {\n    mode=LEGACY\n}\n' > "$S/config/sponge/sponge.conf"
@@ -44,8 +44,8 @@ for _ in $(seq 1 180); do grep -q "Done (" "$S/console.log" 2>/dev/null && break
 grep -q "Done (" "$S/console.log" || { echo "server did not start"; tail -20 "$S/console.log"; exit 1; }
 
 CP="$(native "$WORK/probe")$SEP$(native "$ROOT/networklock-core/build/classes/java/main")"
-PROTO=$(java -cp "$CP" Probe 127.0.0.1 25570 x protocol)
-probe() { java -Dproto="$PROTO" -cp "$CP" Probe 127.0.0.1 25570 "$@" | tr '\n' ' ' | sed 's/ *$//'; }
+PROTO=$(java -cp "$CP" Probe 127.0.0.1 35570 x protocol)
+probe() { java -Dproto="$PROTO" -cp "$CP" Probe 127.0.0.1 35570 "$@" | tr '\n' ' ' | sed 's/ *$//'; }
 check() { if [[ "$3" == "$2"* ]]; then echo "PASS  $1"; else echo "FAIL  $1: expected '$2', got '$3'"; FAILED=1; fi; }
 U=069a79f4-44e9-4726-a5be-fca90e38aaf5
 
