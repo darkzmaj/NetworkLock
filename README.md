@@ -50,9 +50,9 @@ On Sponge, use the `mods` folder and `config/networklock/config.yml`, and turn o
 | `/networklock doctor` | Finds setup mistakes |
 | `/networklock stats` | Shows allowed and blocked logins |
 | `/networklock proxies` | Shows key fingerprints to compare proxy and server |
-| `/networklock version` | Shows the version |
+| `/networklock about` | Shows the version and whether an update is available |
 
-Alias: `/nlock`. Permission: `networklock.admin` for everything, or `networklock.command.<name>` for each command.
+Alias: `/nlock`. Both names can be changed in `config.yml`. Permission: `networklock.admin` for everything, or `networklock.command.<name>` for each command. Staff with `networklock.notify` are told about new versions when they join.
 
 ## Supported versions
 
@@ -72,6 +72,8 @@ Players can join with any Minecraft version your proxy accepts. Needs Java 21 or
 - This is not DDoS protection.
 - Still firewall your servers so only your proxies can reach them. NetworkLock is the lock behind that.
 - If a proxy key leaks, remove it from your servers and run `/networklock reload`.
+- If a player is refused, the server console says exactly why and how to fix it.
+- NetworkLock sends anonymous usage statistics once a day (version and platform only) so we can show how many servers it protects. Turn it off with `metrics.enabled: false`.
 
 ## Support
 
