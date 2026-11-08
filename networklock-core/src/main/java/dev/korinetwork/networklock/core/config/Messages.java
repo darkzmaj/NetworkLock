@@ -1,6 +1,8 @@
 package dev.korinetwork.networklock.core.config;
 
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -32,7 +34,7 @@ public final class Messages {
         d.put("status-unknown", "&7not checked");
         d.put("update-available", "&eA new NetworkLock version is available!\n&7Current: &c%current% &7New: &a%latest%\n"
                 + "&7Download: &b%link%");
-        DEFAULTS = Map.copyOf(d);
+        DEFAULTS = Collections.unmodifiableMap(d);
     }
 
     private final Map<String, String> values;
@@ -54,7 +56,7 @@ public final class Messages {
             if (value != null) v.put(key, value);
         }
         t.throwIfErrors();
-        return new Messages(Map.copyOf(v));
+        return new Messages(Collections.unmodifiableMap(v));
     }
 
     public String get(String key) {
@@ -66,6 +68,6 @@ public final class Messages {
     }
 
     public List<String> keys() {
-        return List.copyOf(DEFAULTS.keySet());
+        return Collections.unmodifiableList(new ArrayList<>(DEFAULTS.keySet()));
     }
 }

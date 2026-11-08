@@ -7,8 +7,8 @@ import dev.korinetwork.networklock.core.BackendCore;
 import dev.korinetwork.networklock.core.ForwardingToken;
 import dev.korinetwork.networklock.core.Outcome;
 import dev.korinetwork.networklock.core.PlayerIdentity;
+import dev.korinetwork.networklock.core.SecurityLog;
 import dev.korinetwork.networklock.core.MiniText;
-import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
@@ -29,13 +29,11 @@ import java.util.logging.Logger;
  */
 final class PaperLoginListener implements Listener {
 
-    private static final LegacyComponentSerializer LEGACY = LegacyComponentSerializer.builder()
-            .character('§').hexColors().useUnusualXRepeatedCharacterHexFormat().build();
-
     private final BackendCore core;
     private final Logger logger;
     /** Denials decided at LOWEST, re-applied at MONITOR in case another plugin re-allowed the login. */
-    private final Map<AsyncPlayerPreLoginEvent, Outcome> denied = Collections.synchronizedMap(new WeakHashMap<>());
+    private final Map<AsyncPlayerPreLoginEvent, Outcome> denied =
+            Collections.synchronizedMap(new WeakHashMap<AsyncPlayerPreLoginEvent, Outcome>());
 
     PaperLoginListener(BackendCore core, Logger logger) {
         this.core = core;
@@ -64,7 +62,7 @@ final class PaperLoginListener implements Listener {
                 e.setPlayerProfile(profile);
             }
         } catch (Throwable t) {
-            logger.severe("Error verifying login of " + e.getName() + " (denied): " + t);
+            logger.severe("Error verifying login of " + SecurityLog.clean(e.getName()) + " (denied): " + t);
             outcome = Outcome.INTERNAL_ERROR;
         }
         if (outcome != Outcome.OK) {
@@ -77,7 +75,7 @@ final class PaperLoginListener implements Listener {
     public void enforce(AsyncPlayerPreLoginEvent e) {
         Outcome outcome = denied.remove(e);
         if (outcome != null && e.getLoginResult() == AsyncPlayerPreLoginEvent.Result.ALLOWED) {
-            logger.warning("Another plugin re-allowed a login NetworkLock denied (" + e.getName() + "); denying again");
+            logger.warning("Another plugin re-allowed a login NetworkLock denied (" + SecurityLog.clean(e.getName()) + "); denying again");
             deny(e, outcome);
         }
     }
@@ -85,16 +83,25 @@ final class PaperLoginListener implements Listener {
     /** Self-check: the credential must have been stripped before the player joined. */
     @EventHandler(priority = EventPriority.MONITOR)
     public void checkStripped(PlayerJoinEvent e) {
-        for (ProfileProperty p : e.getPlayer().getPlayerProfile().getProperties()) {
-            if (ForwardingToken.PROPERTY.equals(p.getName())) {
-                logger.severe("Connection credential still present on " + e.getPlayer().getName()
-                        + "'s profile; please report this with your server version");
-                return;
+        try {
+            for (ProfileProperty p : e.getPlayer().getPlayerProfile().getProperties()) {
+                if (ForwardingToken.PROPERTY.equals(p.getName())) {
+                    logger.severe("Connection credential still present on " + e.getPlayer().getName()
+                            + "'s profile; please report this with your server version");
+                    return;
+                }
             }
+        } catch (LinkageError ignored) {
+            // Player#getPlayerProfile is missing on some old Paper builds; the check is only a diagnostic
         }
     }
 
+    @SuppressWarnings("deprecation") // the String overload exists on every Paper version; Adventure only since 1.16.5
     private void deny(AsyncPlayerPreLoginEvent e, Outcome outcome) {
-        e.disallow(AsyncPlayerPreLoginEvent.Result.KICK_OTHER, LEGACY.deserialize(MiniText.anyToLegacy(core.kickText(outcome))));
+        try {
+            e.disallow(AsyncPlayerPreLoginEvent.Result.KICK_OTHER, MiniText.anyToLegacy(core.kickText(outcome)));
+        } catch (Throwable t) {
+            e.setLoginResult(AsyncPlayerPreLoginEvent.Result.KICK_OTHER); // never let a message problem let the player in
+        }
     }
 }

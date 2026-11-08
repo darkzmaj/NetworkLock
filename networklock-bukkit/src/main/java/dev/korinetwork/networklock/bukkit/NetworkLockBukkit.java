@@ -12,10 +12,6 @@ import org.bukkit.command.Command;
 import org.bukkit.command.CommandMap;
 import org.bukkit.command.CommandSender;
 import org.bukkit.configuration.file.YamlConfiguration;
-import org.bukkit.event.EventHandler;
-import org.bukkit.event.EventPriority;
-import org.bukkit.event.Listener;
-import org.bukkit.event.player.AsyncPlayerPreLoginEvent;
 import org.bukkit.plugin.java.JavaPlugin;
 
 import java.io.File;
@@ -23,8 +19,9 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Backend entry point for Paper and its forks (Folia, Purpur, Pufferfish), loaded through
- * {@code plugin.yml}. Uses no scheduler at all, so it is Folia-safe by construction.
+ * Backend entry point for every Bukkit-family server from 1.8 up (Paper and its forks, Folia and
+ * its forks, Spigot), loaded through {@code plugin.yml}. Uses no scheduler at all, so it is
+ * Folia-safe by construction. Compiled for Java 8 so 1.8 to 1.16 servers can load it.
  */
 public final class NetworkLockBukkit extends JavaPlugin {
 
@@ -40,13 +37,16 @@ public final class NetworkLockBukkit extends JavaPlugin {
         updates = new UpdateChecker(getDescription().getVersion(), log, core::updatesEnabled);
         stats = new UsageStats(getDescription().getVersion(), getServer().getName().toLowerCase(java.util.Locale.ROOT),
                 "server", core::usageId, core::metricsEnabled);
-        String unsupported = PaperSupport.missingApi();
         try {
             // Register before loading config: until a valid config is active every login is denied.
-            if (unsupported == null) {
+            // Paper 1.12.2+ (and Folia) offer the profile in the async pre-login event; everything older or
+            // plain Spigot/CraftBukkit is checked in PlayerLoginEvent instead, which still runs before the join.
+            String unsupported = null;
+            if (PaperSupport.missingApi() == null) {
                 getServer().getPluginManager().registerEvents(new PaperLoginListener(core, getLogger()), this);
             } else {
-                getServer().getPluginManager().registerEvents(new DenyAllListener(), this);
+                unsupported = LegacyLoginListener.missingApi();
+                getServer().getPluginManager().registerEvents(new LegacyLoginListener(core, getLogger()), this);
             }
             core.start();
             if (unsupported != null) core.blockPlatform(unsupported);
@@ -89,12 +89,18 @@ public final class NetworkLockBukkit extends JavaPlugin {
         File spigotYml = new File("spigot.yml");
         boolean bungee = spigotYml.isFile()
                 && YamlConfiguration.loadConfiguration(spigotYml).getBoolean("settings.bungeecord", false);
-        File paperGlobal = new File("config", "paper-global.yml");
-        boolean velocity = paperGlobal.isFile()
-                && YamlConfiguration.loadConfiguration(paperGlobal).getBoolean("proxies.velocity.enabled", false);
-        if (!bungee && !velocity) {
-            out.add("FAIL no proxy forwarding enabled (spigot.yml settings.bungeecord or paper-global.yml"
-                    + " proxies.velocity.enabled); players cannot be verified and every login is denied");
+        File paperGlobal = new File("config", "paper-global.yml"); // Paper 1.19+
+        File paperYml = new File("paper.yml");                     // Paper 1.13 to 1.18
+        boolean velocity = (paperGlobal.isFile()
+                && YamlConfiguration.loadConfiguration(paperGlobal).getBoolean("proxies.velocity.enabled", false))
+                || (paperYml.isFile()
+                && YamlConfiguration.loadConfiguration(paperYml).getBoolean("settings.velocity-support.enabled", false));
+        if (!PaperSupport.hasSpigot()) {
+            out.add("FAIL this is CraftBukkit, which has no proxy forwarding at all; every login is denied."
+                    + " Use Spigot, Paper or a Paper fork behind a proxy");
+        } else if (!bungee && !velocity) {
+            out.add("FAIL no proxy forwarding enabled (spigot.yml settings.bungeecord, or Velocity forwarding in"
+                    + " paper-global.yml / paper.yml); players cannot be verified and every login is denied");
         } else if (bungee && velocity) {
             // observed on Paper 1.21.11: the BungeeCord handshake check runs first and refuses Velocity connections
             out.add("FAIL both spigot.yml settings.bungeecord and Velocity forwarding are enabled; enable only the one your proxy uses");
@@ -166,15 +172,5 @@ public final class NetworkLockBukkit extends JavaPlugin {
                 for (String l : lines) s.sendMessage(prefix + l);
             }
         };
-    }
-
-    /** Fallback for servers without the Paper profile API: no player can be verified, so none may join. */
-    static final class DenyAllListener implements Listener {
-        @EventHandler(priority = EventPriority.MONITOR)
-        @SuppressWarnings("deprecation") // the String overload is the one plain Spigot has
-        public void onPreLogin(AsyncPlayerPreLoginEvent e) {
-            e.disallow(AsyncPlayerPreLoginEvent.Result.KICK_OTHER,
-                    dev.korinetwork.networklock.core.Outcome.RejectCode.UNAVAILABLE.backendMessage());
-        }
     }
 }

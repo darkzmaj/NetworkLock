@@ -1,6 +1,8 @@
 package dev.korinetwork.networklock.core;
 
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
 
@@ -9,7 +11,8 @@ public final class Commands {
 
     public static final String ADMIN_PERMISSION = "networklock.admin";
     public static final String NOTIFY_PERMISSION = "networklock.notify";
-    public static final List<String> SUBCOMMANDS = List.of("help", "about", "status", "reload", "doctor", "stats", "proxies");
+    public static final List<String> SUBCOMMANDS = Collections.unmodifiableList(
+            Arrays.asList("help", "about", "status", "reload", "doctor", "stats", "proxies"));
 
     /** What the command can do on this server. */
     public interface Target {
@@ -76,19 +79,30 @@ public final class Commands {
             return;
         }
         switch (sub) {
-            case "help" -> {
+            case "help": {
                 List<String> lines = new ArrayList<>();
                 for (String c : SUBCOMMANDS) {
                     if (allowed(s, c)) lines.add("/" + label + " " + c + " - " + describe(c));
                 }
                 s.lines(lines);
+                break;
             }
-            case "about" -> s.send(about(s, t));
-            case "status" -> s.lines(t.status());
-            case "stats" -> s.lines(t.stats());
-            case "proxies" -> s.lines(t.proxies());
-            case "doctor" -> s.lines(t.doctor());
-            case "reload" -> {
+            case "about":
+                s.send(about(s, t));
+                break;
+            case "status":
+                s.lines(t.status());
+                break;
+            case "stats":
+                s.lines(t.stats());
+                break;
+            case "proxies":
+                s.lines(t.proxies());
+                break;
+            case "doctor":
+                s.lines(t.doctor());
+                break;
+            case "reload": {
                 List<String> problems = t.reload();
                 if (problems.isEmpty()) {
                     s.message("reloaded");
@@ -96,18 +110,30 @@ public final class Commands {
                     s.message("reload-failed");
                     s.lines(problems);
                 }
+                break;
             }
-            default -> s.message("invalid-command");
+            default:
+                s.message("invalid-command");
         }
     }
 
     static String about(Sender s, Target t) {
         UpdateChecker u = t.updates();
-        String status = switch (u.status()) {
-            case LATEST -> s.text("status-latest");
-            case OUTDATED -> s.text("status-outdated");
-            case UNKNOWN -> s.text("status-unknown");
-        };
+        UpdateChecker.Status st = u.status();
+        String status;
+        switch (st) {
+            case LATEST:
+                status = s.text("status-latest");
+                break;
+            case OUTDATED:
+                status = s.text("status-outdated");
+                break;
+            case UNKNOWN:
+                status = s.text("status-unknown");
+                break;
+            default:
+                throw new IncompatibleClassChangeError(String.valueOf(st));
+        }
         return s.text("about").replace("%status%", status)
                 .replace("%version%", u.current())
                 .replace("%latest%", u.latest())
@@ -123,7 +149,7 @@ public final class Commands {
     }
 
     public static List<String> complete(String[] args, Sender s) {
-        if (args.length > 1) return List.of();
+        if (args.length > 1) return Collections.emptyList();
         String prefix = args.length == 0 ? "" : args[0].toLowerCase(Locale.ROOT);
         List<String> out = new ArrayList<>();
         for (String c : SUBCOMMANDS) {
@@ -133,32 +159,32 @@ public final class Commands {
     }
 
     private static String describe(String sub) {
-        return switch (sub) {
-            case "help" -> "this list";
-            case "about" -> "version, update status and info";
-            case "status" -> "current protection state";
-            case "reload" -> "validate and apply config changes";
-            case "doctor" -> "check for unsafe or broken setup";
-            case "stats" -> "counters since startup";
-            case "proxies" -> "trusted proxy ids and key fingerprints";
-            default -> "";
-        };
+        switch (sub) {
+            case "help": return "this list";
+            case "about": return "version, update status and info";
+            case "status": return "current protection state";
+            case "reload": return "validate and apply config changes";
+            case "doctor": return "check for unsafe or broken setup";
+            case "stats": return "counters since startup";
+            case "proxies": return "trusted proxy ids and key fingerprints";
+            default: return "";
+        }
     }
 
     /** English templates for game servers, which have no messages.yml. */
     public static String builtIn(String key) {
-        return switch (key) {
-            case "prefix" -> "&8[&bNetworkLock&8] &r";
-            case "no-permission" -> "&cYou do not have permission.";
-            case "reloaded" -> "&aConfiguration reloaded.";
-            case "reload-failed" -> "&cReload failed; the previous configuration is still active:";
-            case "invalid-command" -> "&cUnknown command. Use /networklock help.";
-            case "about" -> "&b&lNetworkLock &7v%version%\n&7Version: %status%\n&7Trusted proxies: &f%servers%\n"
+        switch (key) {
+            case "prefix": return "&8[&bNetworkLock&8] &r";
+            case "no-permission": return "&cYou do not have permission.";
+            case "reloaded": return "&aConfiguration reloaded.";
+            case "reload-failed": return "&cReload failed; the previous configuration is still active:";
+            case "invalid-command": return "&cUnknown command. Use /networklock help.";
+            case "about": return "&b&lNetworkLock &7v%version%\n&7Version: %status%\n&7Trusted proxies: &f%servers%\n"
                     + "&7Made by &fDarkZmaj &8| &7Support: &bhttps://kori.my";
-            case "status-latest" -> "&aLATEST";
-            case "status-outdated" -> "&cOUTDATED &7(newest: &f%latest%&7)";
-            case "status-unknown" -> "&7not checked";
-            default -> key;
-        };
+            case "status-latest": return "&aLATEST";
+            case "status-outdated": return "&cOUTDATED &7(newest: &f%latest%&7)";
+            case "status-unknown": return "&7not checked";
+            default: return key;
+        }
     }
 }

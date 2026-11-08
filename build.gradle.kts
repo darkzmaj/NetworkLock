@@ -18,8 +18,15 @@ subprojects {
     java.toolchain.languageVersion.set(JavaLanguageVersion.of(21))
     tasks.withType<JavaCompile> {
         options.encoding = "UTF-8"
-        options.release.set(21)
-        options.compilerArgs.addAll(listOf("-Xlint:all,-processing,-serial", "-Werror"))
+        // Each part runs only on its own platform: core and the Bukkit side load on Java 8 servers (1.8 to 1.16),
+        // the proxies need Java 17+, Sponge 1.21+ needs 21. Tests always run on the build JDK.
+        options.release.set(when {
+            name.contains("Test") -> 21
+            project.name == "networklock-core" || project.name == "networklock-bukkit" -> 8
+            project.name == "networklock-sponge" -> 21
+            else -> 17
+        })
+        options.compilerArgs.addAll(listOf("-Xlint:all,-processing,-serial,-options,-classfile", "-Werror"))
     }
     tasks.withType<ProcessResources> {
         val v = project.version.toString()

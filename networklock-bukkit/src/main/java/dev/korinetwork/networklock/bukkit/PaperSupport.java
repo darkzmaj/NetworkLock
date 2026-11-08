@@ -21,6 +21,16 @@ final class PaperSupport {
         }
     }
 
+    /** BungeeCord/Velocity forwarding is a Spigot feature; plain CraftBukkit does not have it. */
+    static boolean hasSpigot() {
+        try {
+            Class.forName("org.spigotmc.SpigotConfig");
+            return true;
+        } catch (ClassNotFoundException | LinkageError e) {
+            return false;
+        }
+    }
+
     static boolean isStopping(Server server) {
         try {
             return (boolean) Server.class.getMethod("isStopping").invoke(server);

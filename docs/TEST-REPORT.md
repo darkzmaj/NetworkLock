@@ -1,72 +1,41 @@
-# Test report
+# Test report: NetworkLock 1.0.1
 
-NetworkLock 1.0.0, tested on 2026-11-01. Windows 11, Intel i7-14700KF, Java 21 and Java 25. The automated tests also run on Linux in GitHub Actions.
+Tested 2026-11-08 on Windows 11, Intel i7-14700KF (20 cores, 28 threads), 32 GB RAM, with Java 8, 17, 21 and 25. GitHub Actions runs the unit tests and the Paper integration on Linux for every push. Everything ran against localhost only.
 
 ## Unit tests
 
-36 tests, all passing (`./gradlew test`). They cover:
+45 tests, all passing on a clean build (`./gradlew clean test shadowJar`; results checked to be fresh, not left over from an earlier build).
 
-- signatures: every single changed bit is caught, and so is any change to UUID, name, IP, profile data, key, server or time
-- replay: a signature works once, including when 64 threads try the same one at the same moment
-- proxies: wrong key, unknown proxy, one proxy posing as another, key rotation and removal
-- config: broken YAML, missing values, short keys, `env:` and `file:` keys, keys never printed in errors, failed reloads keeping the old config
-- login limiter: limits, refill, temporary blocks, IPv6 grouping, exemptions, memory cap
-- messages: `&` codes, hex colours, MiniMessage tags, and click/hover tags stripped on BungeeCord
-- commands: permission checks
+| Class | Tests | Covers |
+|---|---|---|
+| `ForwardingTokenTest` | 8 | every header byte authenticated, UUID/name/IP/properties tampering caught, malformed input, fresh nonces, property order, and the 1.0.1 optimised MAC byte-identical to the 1.0.0 algorithm over 300 random identities |
+| `BackendCoreTest` | 14 | valid signature accepted once, expiry and clock skew, wrong server, forged identity, cross-proxy misuse, key rotation and revocation, 64-thread replay race (exactly one accepted), broken or missing config locks down, failed reload keeps the old config, secrets never logged |
+| `SupportTest` | 23 | replay memory bounded and expiring, replay still blocked after the lifetime is raised (NL-01), attacker names cannot forge log lines (NL-02), login limiter (burst, refill, blocks, IPv6 /64 grouping, exemptions, memory cap), messages, commands and permissions, env/file keys, usage statistics carry only anonymous data, end-to-end proxy to backend |
 
-## Game server checks (`it/backend-check.sh`)
+New regression tests in 1.0.1: `replayStaysBlockedWhenLifetimeIsRaised`, `attackerNamesCannotForgeLogLines`, `optimisedMacIsByteIdenticalToTheOriginalAlgorithm`, plus a stricter `nonceCacheIsBoundedAndExpires` (a replay is reported as a replay even when the cache is full).
 
-A test client connects straight to the game server, as an attacker would, and tries:
+## Game servers
 
-1. a fake UUID with no signature
-2. a junk signature
-3. a valid signature made for a different server
-4. a valid signature, then the same one again
+23 Bukkit-family and Sponge servers from 1.8.8 to 26.3, each attacked directly with forged, junk, wrong-server and replayed signatures: all 23 behave as expected. Full table in [COMPATIBILITY-REPORT.md](COMPATIBILITY-REPORT.md).
 
-| Server | 1 | 2 | 3 | 4 | Signature removed from profile |
-|---|---|---|---|---|---|
-| Paper 1.21.11 | refused | refused | refused | accepted, then refused | yes |
-| Paper 26.3 (Java 25) | refused | refused | refused | accepted, then refused | yes |
-| Folia 1.21.11 | refused | refused | refused | accepted, then refused | yes |
-| Purpur 1.21.11 | refused | refused | refused | accepted, then refused | yes |
-| Pufferfish 1.21.10 | refused | refused | refused | accepted, then refused | yes |
-| Spigot 1.21.11 | refused | refused | refused | refused (no Paper API, by design) | n/a |
-| CraftBukkit 1.21.11 | refused | refused | refused | refused (no Paper API, by design) | n/a |
-
-| SpongeVanilla 1.21.11 | refused | refused | refused | accepted, then refused | not possible on Sponge (harmless) |
-| SpongeVanilla 26.3 (Java 25) | refused | refused | refused | accepted, then refused | not possible on Sponge (harmless) |
-
-## Full network checks (`it/run-integration.sh`)
-
-Real Paper or Folia, Velocity and Waterfall running together. 15 checks: the attacks above, players joining through Velocity and Waterfall, a refused player seeing the proxy's red `&c` message, and a broken reload being rejected while protection keeps working.
+## Full networks
 
 | Setup | Result |
 |---|---|
-| Paper 1.21.11, Velocity 3.5.1 (legacy), Waterfall 1.21 | 15/15, locally and on GitHub Actions |
-| Folia 1.21.11, Velocity 3.5.1 (bungeeguard), Waterfall 1.21 | 15/15 |
+| Paper 1.21.11 + Velocity 3.5.1 (`legacy`) + Waterfall 1.21 | 15/15 |
+| Folia 1.21.11 + Velocity 3.5.1 (`bungeeguard`) + Waterfall 1.21 | 15/15 |
 
-## Done by hand
+## Load and attack simulation
 
-- Velocity 3.5.1 with `modern` forwarding in front of Paper 1.21.11: works.
-- Velocity 4.3.1 in front of Paper 26.3, both on Java 25: works.
-- Velocity 3.5.1 in front of SpongeVanilla 1.21.11, with Sponge `MODERN` and with Sponge `LEGACY` forwarding: both work, and direct connections to Sponge are refused.
-- BungeeCord: works. Login limit tested: 3 logins allowed, the 4th refused with the limit message, then a temporary block.
-- One game server trusting three proxies, each with its own key: all three work.
-- 48 players logging in at the same moment, each followed by a replay attempt: 48 accepted, 48 replays refused.
+From the end-to-end benchmark ([BENCHMARK-REPORT.md](BENCHMARK-REPORT.md)), real logins through Velocity into Paper 1.21.11:
 
-## Speed
-
-| Action | Time |
-|---|---|
-| Proxy creating a signature | about 1.5 µs |
-| Game server checking a signature | about 4.7 µs |
-| Both, on 28 threads | about 437,000 logins per second |
-
-The check runs once per player connection on Paper's async login thread, never per tick. Memory for the replay list is about 100 bytes per login.
+- Every forged direct login was refused while real players were joining through the proxy (mixed workload).
+- No signature was ever accepted twice, and no valid login was refused because of NetworkLock.
+- Reconnect storms (10 names logging in over and over) did not trip the replay check: every connection gets a fresh signature.
 
 ## Not tested
 
-- Online-mode proxies sending real skins (needs real accounts). The skin data is covered by unit tests.
-- FlameCord (no official build available).
-- Long uptime runs over many hours.
-- An outside security review of the design.
+- Real Mojang accounts and online-mode skins (the skin data itself is covered by unit tests).
+- Hybrid servers (Arclight, Mohist) and FlameCord.
+- Runs longer than the 2-minute sustained benchmark; no multi-hour soak.
+- An outside security review.

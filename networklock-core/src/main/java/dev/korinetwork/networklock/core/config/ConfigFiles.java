@@ -2,6 +2,7 @@ package dev.korinetwork.networklock.core.config;
 
 import dev.korinetwork.networklock.core.Keys;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
@@ -32,7 +33,10 @@ public final class ConfigFiles {
         if (Files.exists(target)) return target;
         try (InputStream in = ConfigFiles.class.getResourceAsStream("/defaults/" + side + "/" + name)) {
             if (in == null) throw new IOException("missing bundled default " + side + "/" + name);
-            writeAtomically(target, new String(in.readAllBytes(), StandardCharsets.UTF_8));
+            ByteArrayOutputStream buf = new ByteArrayOutputStream();
+            byte[] chunk = new byte[8192];
+            for (int n; (n = in.read(chunk)) != -1; ) buf.write(chunk, 0, n);
+            writeAtomically(target, new String(buf.toByteArray(), StandardCharsets.UTF_8));
         }
         restrictPermissions(target);
         return target;
@@ -44,7 +48,7 @@ public final class ConfigFiles {
      * references and edited files are left untouched.
      */
     public static boolean generateProxyKeyIfUnset(Path config) throws IOException {
-        String text = Files.readString(config, StandardCharsets.UTF_8);
+        String text = new String(Files.readAllBytes(config), StandardCharsets.UTF_8);
         Matcher m = EMPTY_KEY.matcher(text);
         if (!m.find()) return false;
         String updated = text.substring(0, m.start()) + m.group(1) + "\"" + Keys.generate() + "\"" + text.substring(m.end());
@@ -57,7 +61,7 @@ public final class ConfigFiles {
         Path tmp = Files.createTempFile(target.getParent(), ".networklock", ".tmp");
         try {
             restrictPermissions(tmp);
-            Files.writeString(tmp, content, StandardCharsets.UTF_8);
+            Files.write(tmp, content.getBytes(StandardCharsets.UTF_8));
             try {
                 Files.move(tmp, target, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
             } catch (AtomicMoveNotSupportedException e) {

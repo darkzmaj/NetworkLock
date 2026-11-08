@@ -43,7 +43,47 @@ public final class ForwardingToken {
     private ForwardingToken() {}
 
     /** Structurally valid token fields. Nothing here is authenticated until {@link #macMatches} succeeds. */
-    public record Parsed(String proxyId, String target, long issuedAtMillis, byte[] nonce, byte[] header, byte[] mac) {}
+    public static final class Parsed {
+        private final String proxyId;
+        private final String target;
+        private final long issuedAtMillis;
+        private final byte[] nonce;
+        private final byte[] header;
+        private final byte[] mac;
+
+        public Parsed(String proxyId, String target, long issuedAtMillis, byte[] nonce, byte[] header, byte[] mac) {
+            this.proxyId = proxyId;
+            this.target = target;
+            this.issuedAtMillis = issuedAtMillis;
+            this.nonce = nonce;
+            this.header = header;
+            this.mac = mac;
+        }
+
+        public String proxyId() {
+            return proxyId;
+        }
+
+        public String target() {
+            return target;
+        }
+
+        public long issuedAtMillis() {
+            return issuedAtMillis;
+        }
+
+        public byte[] nonce() {
+            return nonce;
+        }
+
+        public byte[] header() {
+            return header;
+        }
+
+        public byte[] mac() {
+            return mac;
+        }
+    }
 
     public static String mint(String proxyId, byte[] key, String target, PlayerIdentity identity, long nowMillis) {
         byte[] nonce = new byte[NONCE_BYTES];
@@ -97,48 +137,97 @@ public final class ForwardingToken {
         return ok;
     }
 
+    /**
+     * Per-thread crypto objects. Looking up a Mac/MessageDigest provider and scheduling the key
+     * dominated the cost of a login; reusing them changes nothing about the bytes being MACed.
+     */
+    private static final class Crypto {
+        final Mac mac;
+        final MessageDigest sha;
+        final byte[] scratch = new byte[16];
+        byte[] macKey; // the key array the Mac is initialised with (compared by identity)
+
+        Crypto() {
+            try {
+                mac = Mac.getInstance("HmacSHA256");
+                sha = MessageDigest.getInstance("SHA-256");
+            } catch (GeneralSecurityException e) {
+                throw new IllegalStateException("HmacSHA256/SHA-256 unavailable", e);
+            }
+        }
+    }
+
+    private static final ThreadLocal<Crypto> CRYPTO = new ThreadLocal<Crypto>() {
+        @Override
+        protected Crypto initialValue() {
+            return new Crypto();
+        }
+    };
+
     static byte[] mac(byte[] key, byte[] header, PlayerIdentity id) {
+        Crypto c = CRYPTO.get();
         try {
-            Mac hmac = Mac.getInstance("HmacSHA256");
-            hmac.init(new SecretKeySpec(key, "HmacSHA256"));
+            if (c.macKey != key) {
+                c.mac.init(new SecretKeySpec(key, "HmacSHA256"));
+                c.macKey = key;
+            }
+            Mac hmac = c.mac; // doFinal() below leaves it reset and keyed for the next call
             hmac.update(DOMAIN);
             hmac.update(header);
-            hmac.update(ByteBuffer.allocate(16).putLong(id.uuid().getMostSignificantBits())
-                    .putLong(id.uuid().getLeastSignificantBits()).array());
-            hmac.update(lengthPrefixed(id.name()));
-            hmac.update(lengthPrefixed(id.address()));
-            hmac.update(propertiesDigest(id.properties()));
+            ByteBuffer.wrap(c.scratch).putLong(id.uuid().getMostSignificantBits()).putLong(id.uuid().getLeastSignificantBits());
+            hmac.update(c.scratch, 0, 16);
+            updateLengthPrefixed(hmac, null, c.scratch, id.name());
+            updateLengthPrefixed(hmac, null, c.scratch, id.address());
+            hmac.update(propertiesDigest(c, id.properties()));
             return hmac.doFinal();
         } catch (GeneralSecurityException e) {
             throw new IllegalStateException("HmacSHA256 unavailable", e);
+        } catch (RuntimeException e) {
+            c.macKey = null; // a half-fed Mac must not be reused as if it were fresh
+            c.mac.reset();
+            throw e;
         }
     }
 
     /** Order-independent digest of the forwarded properties, ignoring any NetworkLock token. */
     static byte[] propertiesDigest(List<PlayerIdentity.Property> properties) {
+        return propertiesDigest(CRYPTO.get(), properties);
+    }
+
+    private static byte[] propertiesDigest(Crypto c, List<PlayerIdentity.Property> properties) {
         List<PlayerIdentity.Property> sorted = new ArrayList<>(properties.size());
         for (PlayerIdentity.Property p : properties) {
             if (!PROPERTY.equals(p.name())) sorted.add(p);
         }
-        sorted.sort(Comparator.comparing(PlayerIdentity.Property::name)
-                .thenComparing(PlayerIdentity.Property::value)
-                .thenComparing(PlayerIdentity.Property::signature));
-        try {
-            MessageDigest sha = MessageDigest.getInstance("SHA-256");
-            for (PlayerIdentity.Property p : sorted) {
-                sha.update(lengthPrefixed(p.name()));
-                sha.update(lengthPrefixed(p.value()));
-                sha.update(lengthPrefixed(p.signature()));
-            }
-            return sha.digest();
-        } catch (GeneralSecurityException e) {
-            throw new IllegalStateException(e);
+        if (sorted.size() > 1) {
+            sorted.sort(Comparator.comparing(PlayerIdentity.Property::name)
+                    .thenComparing(PlayerIdentity.Property::value)
+                    .thenComparing(PlayerIdentity.Property::signature));
         }
+        MessageDigest sha = c.sha;
+        sha.reset();
+        for (PlayerIdentity.Property p : sorted) {
+            updateLengthPrefixed(null, sha, c.scratch, p.name());
+            updateLengthPrefixed(null, sha, c.scratch, p.value());
+            updateLengthPrefixed(null, sha, c.scratch, p.signature());
+        }
+        return sha.digest();
     }
 
-    private static byte[] lengthPrefixed(String s) {
+    /** Feeds a 4-byte big-endian length and the UTF-8 bytes, the same encoding as before, without the copy. */
+    private static void updateLengthPrefixed(Mac mac, MessageDigest sha, byte[] scratch, String s) {
         byte[] b = s.getBytes(StandardCharsets.UTF_8);
-        return ByteBuffer.allocate(4 + b.length).putInt(b.length).put(b).array();
+        scratch[0] = (byte) (b.length >>> 24);
+        scratch[1] = (byte) (b.length >>> 16);
+        scratch[2] = (byte) (b.length >>> 8);
+        scratch[3] = (byte) b.length;
+        if (mac != null) {
+            mac.update(scratch, 0, 4);
+            mac.update(b);
+        } else {
+            sha.update(scratch, 0, 4);
+            sha.update(b);
+        }
     }
 
     private static String readString(ByteBuffer buf) {

@@ -1,10 +1,10 @@
 package dev.korinetwork.networklock.core;
 
+import java.io.ByteArrayOutputStream;
+import java.io.InputStream;
+import java.net.HttpURLConnection;
 import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
-import java.time.Duration;
+import java.nio.charset.StandardCharsets;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -52,14 +52,24 @@ public final class UpdateChecker {
 
     void check() {
         if (!enabled.getAsBoolean()) return;
+        HttpURLConnection conn = null;
         try {
-            HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
-            HttpRequest request = HttpRequest.newBuilder(API).timeout(Duration.ofSeconds(10))
-                    .header("Accept", "application/vnd.github+json")
-                    .header("User-Agent", "NetworkLock/" + current).GET().build();
-            HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
-            if (response.statusCode() != 200) return;
-            String found = parseTag(response.body());
+            conn = (HttpURLConnection) API.toURL().openConnection();
+            conn.setConnectTimeout(10_000);
+            conn.setReadTimeout(10_000);
+            conn.setRequestMethod("GET");
+            conn.setInstanceFollowRedirects(false); // java.net.http never followed redirects by default
+            conn.setRequestProperty("Accept", "application/vnd.github+json");
+            conn.setRequestProperty("User-Agent", "NetworkLock/" + current);
+            if (conn.getResponseCode() != 200) return;
+            String body;
+            try (InputStream in = conn.getInputStream()) {
+                ByteArrayOutputStream buf = new ByteArrayOutputStream();
+                byte[] chunk = new byte[8192];
+                for (int n; (n = in.read(chunk)) != -1; ) buf.write(chunk, 0, n);
+                body = new String(buf.toByteArray(), StandardCharsets.UTF_8);
+            }
+            String found = parseTag(body);
             if (found == null) return;
             latest = found;
             if (isNewer(found, current)) {
@@ -69,6 +79,8 @@ public final class UpdateChecker {
             // offline or rate-limited: the status just stays unknown
         } catch (Throwable t) {
             // never let the update check affect the server
+        } finally {
+            if (conn != null) conn.disconnect();
         }
     }
 

@@ -7,12 +7,15 @@ import dev.korinetwork.networklock.core.config.Settings;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.LongAdder;
 import java.util.function.LongSupplier;
+import java.util.stream.Collectors;
 
 /**
  * Backend admission control. Holds one immutable configuration snapshot; when no valid
@@ -21,10 +24,42 @@ import java.util.function.LongSupplier;
  */
 public final class BackendCore {
 
-    private record Active(Settings.Backend settings, NonceCache nonces) {}
+    private static final class Active {
+        private final Settings.Backend settings;
+        private final NonceCache nonces;
+
+        Active(Settings.Backend settings, NonceCache nonces) {
+            this.settings = settings;
+            this.nonces = nonces;
+        }
+
+        Settings.Backend settings() {
+            return settings;
+        }
+
+        NonceCache nonces() {
+            return nonces;
+        }
+    }
 
     /** An outcome plus a plain-language explanation for the console. Never shown to players. */
-    private record Decision(Outcome outcome, String detail) {}
+    private static final class Decision {
+        private final Outcome outcome;
+        private final String detail;
+
+        Decision(Outcome outcome, String detail) {
+            this.outcome = outcome;
+            this.detail = detail;
+        }
+
+        Outcome outcome() {
+            return outcome;
+        }
+
+        String detail() {
+            return detail;
+        }
+    }
 
     private final Path dataDir;
     private final Log log;
@@ -80,7 +115,7 @@ public final class BackendCore {
         active = new Active(s, cache);
         lockdownReason = null;
         for (String w : s.warnings()) log.warn(w);
-        return List.of();
+        return Collections.emptyList();
     }
 
     public void lockdown(String reason) {
@@ -113,12 +148,12 @@ public final class BackendCore {
         boolean redact = a != null && a.settings().logging().redactAddresses();
         if (outcome == Outcome.OK) {
             if (a != null && a.settings().logging().debug()) {
-                log.info("Accepted " + identity.name() + " (" + identity.uuid() + ") properties="
-                        + identity.properties().stream().map(PlayerIdentity.Property::name).toList());
+                log.info("Accepted " + SecurityLog.clean(identity.name()) + " (" + identity.uuid() + ") properties="
+                        + identity.properties().stream().map(PlayerIdentity.Property::name).collect(Collectors.toList()));
             }
         } else if (a == null || a.settings().logging().securityEvents()) {
             Decision d = decision;
-            securityLog.event(() -> "Denied login name=" + identity.name() + " uuid=" + identity.uuid()
+            securityLog.event(() -> "Denied login name=" + SecurityLog.clean(identity.name()) + " uuid=" + identity.uuid()
                     + " address=" + SecurityLog.address(identity.address(), redact) + " reason=" + d.outcome()
                     + ": " + d.detail(), clock.getAsLong());
         }
@@ -167,12 +202,18 @@ public final class BackendCore {
             return new Decision(Outcome.NOT_YET_VALID, "the proxy's clock is " + (-age) / 1000
                     + "s ahead of this server. Sync the server clocks");
         }
-        long expiry = t.issuedAtMillis() + a.settings().maxAgeMillis() + a.settings().skewMillis();
-        return switch (a.nonces().use(t.nonce(), expiry, now)) {
-            case FRESH -> new Decision(Outcome.OK, "");
-            case REPLAY -> new Decision(Outcome.REPLAYED, "this signature was already used once");
-            case FULL -> new Decision(Outcome.REPLAY_CACHE_FULL, "the replay cache is full; raise authentication.replay-cache-max-entries");
-        };
+        long retention = a.settings().maxAgeMillis() + a.settings().skewMillis();
+        NonceCache.Result result = a.nonces().use(t.nonce(), t.issuedAtMillis(), now, retention);
+        switch (result) {
+            case FRESH:
+                return new Decision(Outcome.OK, "");
+            case REPLAY:
+                return new Decision(Outcome.REPLAYED, "this signature was already used once");
+            case FULL:
+                return new Decision(Outcome.REPLAY_CACHE_FULL, "the replay cache is full; raise authentication.replay-cache-max-entries");
+            default:
+                throw new IncompatibleClassChangeError(String.valueOf(result));
+        }
     }
 
     /** The kick text for a denied login: the server's own messages.* entry, or the built-in text. */
@@ -197,7 +238,7 @@ public final class BackendCore {
     public String usageId() {
         Active a = active;
         if (a == null) return null;
-        List<String> parts = new ArrayList<>(List.of("server", a.settings().serverId()));
+        List<String> parts = new ArrayList<>(Arrays.asList("server", a.settings().serverId()));
         a.settings().proxies().keySet().stream().sorted().forEach(p -> parts.addAll(a.settings().fingerprints(p)));
         return UsageStats.anonymousId(parts.toArray(new String[0]));
     }
@@ -248,7 +289,7 @@ public final class BackendCore {
 
     public List<String> proxiesLines() {
         Active a = active;
-        if (a == null) return List.of("No configuration loaded (lockdown).");
+        if (a == null) return Collections.singletonList("No configuration loaded (lockdown).");
         List<String> out = new ArrayList<>();
         for (Settings.TrustedProxy p : a.settings().proxies().values()) {
             out.add(p.id() + " - key fingerprints " + a.settings().fingerprints(p.id()));

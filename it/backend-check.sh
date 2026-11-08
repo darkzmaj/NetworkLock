@@ -6,12 +6,15 @@
 #   it/backend-check.sh path/to/server.jar [expect]
 #
 # expect = "enforce" (default): forged logins rejected, valid token accepted once.
-# expect = "deny-all": every login rejected (servers without the Paper profile API, e.g. Spigot).
+# expect = "deny-all": every login rejected (a server where players cannot be checked, e.g. CraftBukkit).
+# SERVER_JAVA=/path/to/java runs the server on another Java (e.g. Java 8 for 1.8); the test
+# client always uses the java on PATH (21+).
 # Needs bash, openssl, Java on PATH and port 35570 free. Run from the repository root.
 set -uo pipefail
 
 SERVER_JAR=$(cd "$(dirname "$1")" && pwd)/$(basename "$1")
 EXPECT=${2:-enforce}
+SERVER_JAVA=${SERVER_JAVA:-java}
 ROOT=$(pwd)
 WORK="$ROOT/it/work/backend-check"
 SEP=":"; native() { echo "$1"; }
@@ -35,12 +38,19 @@ else
 fi
 printf 'network:\n  server-id: "lobby"\nauthentication:\n  trusted-proxies:\n    - id: "proxy-1"\n      keys: ["%s"]\nlogging:\n  debug: true\n' "$KEY" > "$DATA/config.yml"
 
-: > "$S/cmd.txt"
-(cd "$S" && tail -f cmd.txt | java -Xmx1G -jar "$SERVER_JAR" --nogui > console.log 2>&1) < /dev/null > /dev/null 2>&1 &
-PID=$!
+launch() {
+    : > "$S/cmd.txt"
+    (cd "$S" && tail -f cmd.txt | "$SERVER_JAVA" -Xmx1G -jar "$SERVER_JAR" nogui > console.log 2>&1) < /dev/null > /dev/null 2>&1 &
+    PID=$!
+    for _ in $(seq 1 180); do
+        grep -q "Done (" "$S/console.log" 2>/dev/null && return 0
+        grep -q "start the server again" "$S/console.log" 2>/dev/null && return 1 # e.g. Leaf's first-run loader config
+        sleep 1
+    done
+}
 cleanup() { echo stop >> "$S/cmd.txt"; sleep 10; echo >> "$S/cmd.txt"; sleep 1; kill "$PID" 2>/dev/null; }
 trap cleanup EXIT
-for _ in $(seq 1 180); do grep -q "Done (" "$S/console.log" 2>/dev/null && break; sleep 1; done
+launch || { sleep 5; echo >> "$S/cmd.txt"; kill "$PID" 2>/dev/null; launch; }
 grep -q "Done (" "$S/console.log" || { echo "server did not start"; tail -20 "$S/console.log"; exit 1; }
 
 CP="$(native "$WORK/probe")$SEP$(native "$ROOT/networklock-core/build/classes/java/main")"
@@ -55,21 +65,27 @@ check "junk token"                "REJECTED" "$(probe Notch garbage $U)"
 check "token for another server"  "REJECTED" "$(probe Notch token $U proxy-1 "$KEY" survival 127.0.0.1)"
 R=$(probe Notch token $U proxy-1 "$KEY" lobby 127.0.0.1 replay)
 if [ "$EXPECT" = "deny-all" ]; then
-    check "valid token still refused (no Paper API)" "REJECTED" "$R"
-    grep -q "lacks the Paper profile API" "$S/console.log" && echo "PASS  lockdown reason logged" \
-        || { echo "FAIL  lockdown reason not logged"; FAILED=1; }
+    check "valid token still refused" "REJECTED" "$R"
 else
     check "valid token accepted" "ACCEPTED" "$R"
     [[ "$R" == *"replay: REJECTED"*"NL-04"* ]] && echo "PASS  replay rejected (NL-04)" || { echo "FAIL  replay: $R"; FAILED=1; }
     if [ "$SPONGE" = 1 ]; then
         echo "SKIP  credential strip (Sponge profiles are read-only; a used credential cannot be replayed)"
+    elif grep -q "left in (read-only)" "$S/console.log"; then
+        echo "INFO  credential left in a read-only profile on this version (used, so it cannot be replayed)"
+    elif grep -q "still present" "$S/console.log"; then
+        echo "FAIL  credential reached the live profile"; FAILED=1
     else
-        grep -q "still present" "$S/console.log" && { echo "FAIL  credential reached the live profile"; FAILED=1; } \
-            || echo "PASS  credential stripped from profile"
+        echo "PASS  credential stripped from profile"
     fi
 fi
 echo "nlock doctor" >> "$S/cmd.txt"; sleep 3
-grep -q "OK   proxy forwarding" "$S/console.log" && echo "PASS  doctor ran" || { echo "FAIL  doctor output missing"; FAILED=1; }
+if [ "$EXPECT" = "deny-all" ]; then
+    grep -q "FAIL this is CraftBukkit\|FAIL lockdown" "$S/console.log" && echo "PASS  doctor explains why" \
+        || { echo "FAIL  doctor does not explain why logins are refused"; FAILED=1; }
+else
+    grep -q "OK   proxy forwarding" "$S/console.log" && echo "PASS  doctor ran" || { echo "FAIL  doctor output missing"; FAILED=1; }
+fi
 grep -qE "Exception|Could not load" <(grep -i networklock "$S/console.log") && { echo "FAIL  NetworkLock errors in console"; FAILED=1; }
 
 [ "$FAILED" = 0 ] && echo "== ALL PASSED" || echo "== FAILURES (log: $S/console.log)"

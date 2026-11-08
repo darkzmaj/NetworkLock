@@ -81,14 +81,47 @@ class SupportTest {
     @Test
     void nonceCacheIsBoundedAndExpires() {
         NonceCache c = new NonceCache(2);
-        assertEquals(NonceCache.Result.FRESH, c.use(new byte[16], 100, 0));
+        assertEquals(NonceCache.Result.FRESH, c.use(new byte[16], 0, 0, 100));
         byte[] n2 = new byte[16];
         n2[0] = 1;
-        assertEquals(NonceCache.Result.FRESH, c.use(n2, 100, 0));
+        assertEquals(NonceCache.Result.FRESH, c.use(n2, 0, 0, 100));
         byte[] n3 = new byte[16];
         n3[0] = 2;
-        assertEquals(NonceCache.Result.FULL, c.use(n3, 100, 0), "fails closed when full");
-        assertEquals(NonceCache.Result.FRESH, c.use(n3, 300, 200), "expired entries make room");
+        assertEquals(NonceCache.Result.FULL, c.use(n3, 0, 0, 100), "fails closed when full");
+        assertEquals(NonceCache.Result.FRESH, c.use(n3, 200, 200, 100), "expired entries make room");
+    }
+
+    /** Regression (audit NL-01): raising the token lifetime by reload must not let a used token through again. */
+    @Test
+    void replayStaysBlockedWhenLifetimeIsRaised() {
+        NonceCache c = new NonceCache(1);
+        byte[] n = new byte[16];
+        assertEquals(NonceCache.Result.FRESH, c.use(n, 0, 10, 35_000));
+        // later the admin raises max-token-age from 30s to 300s; the same token is still inside the new window
+        assertEquals(NonceCache.Result.REPLAY, c.use(n, 0, 100_000, 305_000),
+                "an entry must be kept for the current lifetime, not the one in force when it was stored");
+    }
+
+    /** Regression (audit NL-02): names from direct connections are not validated on old servers. */
+    @Test
+    void attackerNamesCannotForgeLogLines() throws Exception {
+        String key = Keys.generate();
+        Files.writeString(dir.resolve("config.yml"), "network:\n  server-id: lobby\nauthentication:\n  trusted-proxies:\n"
+                + "    - id: p\n      keys: [\"" + key + "\"]\n");
+        List<String> logged = new java.util.ArrayList<>();
+        Log capture = new Log() {
+            public void info(String m) { logged.add(m); }
+            public void warn(String m) { logged.add(m); }
+            public void error(String m) { logged.add(m); }
+        };
+        BackendCore core = new BackendCore(dir, capture, now::get, Map.of());
+        assertTrue(core.start());
+        String evil = "x\n[Server] Op granted to Attacker\u001b[2J" + "y".repeat(100);
+        core.verify(new PlayerIdentity(UUID.randomUUID(), evil, "192.0.2.1", List.of()), List.of());
+        String line = logged.get(logged.size() - 1);
+        assertFalse(line.contains("\n") || line.contains("\u001b"), line);
+        assertTrue(line.contains("name=x?[Server] Op granted"), line);
+        assertFalse(line.contains("y".repeat(40)), "names are capped");
     }
 
     @Test

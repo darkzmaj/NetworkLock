@@ -24,14 +24,30 @@ public final class Addresses {
     }
 
     public static String normalize(SocketAddress address) {
-        if (address instanceof InetSocketAddress inet && inet.getAddress() != null) {
-            return normalize(inet.getAddress());
+        if (address instanceof InetSocketAddress && ((InetSocketAddress) address).getAddress() != null) {
+            return normalize(((InetSocketAddress) address).getAddress());
         }
         return ""; // unix domain sockets and unresolved addresses carry no client IP
     }
 
     /** An address range, e.g. {@code 10.0.0.0/8} or {@code 2001:db8::/32}. A bare address is a single host. */
-    public record Cidr(byte[] network, int prefix) {
+    public static final class Cidr {
+
+        private final byte[] network;
+        private final int prefix;
+
+        public Cidr(byte[] network, int prefix) {
+            this.network = network;
+            this.prefix = prefix;
+        }
+
+        public byte[] network() {
+            return network;
+        }
+
+        public int prefix() {
+            return prefix;
+        }
 
         public static Cidr parse(String text) {
             String s = text.trim();

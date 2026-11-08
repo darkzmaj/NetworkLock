@@ -1,7 +1,7 @@
 name: NetworkLock
 main: dev.korinetwork.networklock.bukkit.NetworkLockBukkit
 version: "${version}"
-api-version: "1.21"
+api-version: "1.13"
 load: STARTUP
 folia-supported: true
 description: Makes players join your servers only through your proxy.

@@ -9,6 +9,8 @@ import java.io.IOException;
 import java.net.InetAddress;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.LongAdder;
@@ -19,7 +21,29 @@ public final class ProxyCore {
 
     public enum Admission { ALLOWED, LIMITED, BLOCKED, LOCKDOWN }
 
-    private record Active(Settings.Proxy settings, Messages messages, ConnectionLimiter limiter) {}
+    private static final class Active {
+        private final Settings.Proxy settings;
+        private final Messages messages;
+        private final ConnectionLimiter limiter;
+
+        Active(Settings.Proxy settings, Messages messages, ConnectionLimiter limiter) {
+            this.settings = settings;
+            this.messages = messages;
+            this.limiter = limiter;
+        }
+
+        Settings.Proxy settings() {
+            return settings;
+        }
+
+        Messages messages() {
+            return messages;
+        }
+
+        ConnectionLimiter limiter() {
+            return limiter;
+        }
+    }
 
     private final Path dataDir;
     private final Log log;
@@ -73,7 +97,7 @@ public final class ProxyCore {
         active = new Active(s, m, new ConnectionLimiter(s.limiter()));
         lockdownReason = null;
         log.info("Proxy '" + s.networkId() + "' ready, key fingerprint " + s.keyFingerprint());
-        return List.of();
+        return Collections.emptyList();
     }
 
     private void lockdown(String reason) {
@@ -93,11 +117,21 @@ public final class ProxyCore {
             log.warn("Connection flood: more than " + a.settings().limiter().floodThreshold()
                     + " login attempts in one second across all addresses");
         }
-        Admission result = switch (a.limiter().check(address, now)) {
-            case ALLOWED -> Admission.ALLOWED;
-            case LIMITED -> Admission.LIMITED;
-            case BLOCKED -> Admission.BLOCKED;
-        };
+        ConnectionLimiter.Decision decision = a.limiter().check(address, now);
+        final Admission result;
+        switch (decision) {
+            case ALLOWED:
+                result = Admission.ALLOWED;
+                break;
+            case LIMITED:
+                result = Admission.LIMITED;
+                break;
+            case BLOCKED:
+                result = Admission.BLOCKED;
+                break;
+            default:
+                throw new IncompatibleClassChangeError(String.valueOf(decision));
+        }
         if (result != Admission.ALLOWED) {
             (result == Admission.LIMITED ? limited : blocked).increment();
             if (a.settings().logging().securityEvents()) {
@@ -163,7 +197,7 @@ public final class ProxyCore {
 
     public List<String> statusLines() {
         Active a = active;
-        if (a == null) return List.of("State: LOCKDOWN - logins refused (" + lockdownReason + ")");
+        if (a == null) return Collections.singletonList("State: LOCKDOWN - logins refused (" + lockdownReason + ")");
         long now = clock.getAsLong();
         List<String> out = new ArrayList<>();
         out.add("State: enforcing");
@@ -176,16 +210,17 @@ public final class ProxyCore {
     }
 
     public List<String> statsLines() {
-        return List.of("signed connections: " + minted.sum(), "throttled logins: " + limited.sum(),
+        return Collections.unmodifiableList(Arrays.asList("signed connections: " + minted.sum(), "throttled logins: " + limited.sum(),
                 "blocked logins: " + blocked.sum(), "refused during lockdown: " + lockdownDenied.sum(),
-                "backend rejections: " + backendRejections.sum());
+                "backend rejections: " + backendRejections.sum()));
     }
 
     public List<String> proxiesLines() {
         Active a = active;
-        if (a == null) return List.of("No configuration loaded (lockdown).");
-        return List.of("This proxy: " + a.settings().networkId() + " (key fingerprint " + a.settings().keyFingerprint() + ")",
-                "Backends must list this id with a key of the same fingerprint.");
+        if (a == null) return Collections.singletonList("No configuration loaded (lockdown).");
+        return Collections.unmodifiableList(Arrays.asList(
+                "This proxy: " + a.settings().networkId() + " (key fingerprint " + a.settings().keyFingerprint() + ")",
+                "Backends must list this id with a key of the same fingerprint."));
     }
 
     public List<String> doctorLines() {

@@ -6,6 +6,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.Map;
 
 /**
@@ -21,14 +22,14 @@ final class Secrets {
         if (value.startsWith("env:")) {
             String name = value.substring(4);
             String fromEnv = env.get(name);
-            if (fromEnv == null || fromEnv.isBlank()) {
+            if (fromEnv == null || fromEnv.trim().isEmpty()) {
                 throw new IllegalArgumentException("environment variable " + name + " is not set");
             }
             value = fromEnv;
         } else if (value.startsWith("file:")) {
-            Path file = Path.of(value.substring(5));
+            Path file = Paths.get(value.substring(5));
             try {
-                value = Files.readString(file, StandardCharsets.UTF_8).trim();
+                value = new String(Files.readAllBytes(file), StandardCharsets.UTF_8).trim();
             } catch (IOException e) {
                 throw new IllegalArgumentException("cannot read key file " + file);
             }

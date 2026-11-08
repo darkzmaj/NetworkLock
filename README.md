@@ -58,14 +58,16 @@ Alias: `/nlock`. Both names can be changed in `config.yml`. Permission: `network
 
 | Platform | Versions |
 |---|---|
-| Paper, Folia, Purpur, Pufferfish | Minecraft 1.21 to 26.3 |
+| Paper and its forks (Purpur, Pufferfish, Leaf, Gale, ...) | Minecraft 1.8.8 to 26.3 |
+| Folia and its forks (Kaiiju, ...) | Minecraft 1.20.1 to 26.3 |
+| Spigot | Minecraft 1.8.8 to 26.3 |
 | Sponge | Minecraft 1.21.10 to 26.3 |
 | Velocity | 3.5 and newer, including 4.x |
 | BungeeCord, Waterfall | 1.21 |
 
-Players can join with any Minecraft version your proxy accepts. Needs Java 21 or newer (Java 25 for Minecraft 26.x).
+One jar for all of them. Game servers run it on Java 8 and newer, so old 1.8 servers work too. Players can join with any Minecraft version your proxy accepts.
 
-**Plain Spigot and CraftBukkit are not supported**, because they are missing the Paper API that NetworkLock needs. On them it locks the server instead of running without protection.
+**CraftBukkit is not supported**: it has no proxy forwarding at all. On it NetworkLock lets nobody join, and `/networklock doctor` says why.
 
 ## Good to know
 

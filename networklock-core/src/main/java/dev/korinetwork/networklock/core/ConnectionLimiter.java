@@ -16,11 +16,93 @@ public final class ConnectionLimiter {
 
     public enum Decision { ALLOWED, LIMITED, BLOCKED }
 
-    public record Settings(boolean enabled, int maxAttempts, int windowSeconds, boolean tempBlocks,
-                           int violationsBeforeBlock, int blockSeconds, int ipv6Prefix,
-                           List<Addresses.Cidr> exempt, int maxTracked, int floodThreshold) {}
+    public static final class Settings {
+        private final boolean enabled;
+        private final int maxAttempts;
+        private final int windowSeconds;
+        private final boolean tempBlocks;
+        private final int violationsBeforeBlock;
+        private final int blockSeconds;
+        private final int ipv6Prefix;
+        private final List<Addresses.Cidr> exempt;
+        private final int maxTracked;
+        private final int floodThreshold;
 
-    private record Key(long hi, long lo) {}
+        public Settings(boolean enabled, int maxAttempts, int windowSeconds, boolean tempBlocks,
+                        int violationsBeforeBlock, int blockSeconds, int ipv6Prefix,
+                        List<Addresses.Cidr> exempt, int maxTracked, int floodThreshold) {
+            this.enabled = enabled;
+            this.maxAttempts = maxAttempts;
+            this.windowSeconds = windowSeconds;
+            this.tempBlocks = tempBlocks;
+            this.violationsBeforeBlock = violationsBeforeBlock;
+            this.blockSeconds = blockSeconds;
+            this.ipv6Prefix = ipv6Prefix;
+            this.exempt = exempt;
+            this.maxTracked = maxTracked;
+            this.floodThreshold = floodThreshold;
+        }
+
+        public boolean enabled() {
+            return enabled;
+        }
+
+        public int maxAttempts() {
+            return maxAttempts;
+        }
+
+        public int windowSeconds() {
+            return windowSeconds;
+        }
+
+        public boolean tempBlocks() {
+            return tempBlocks;
+        }
+
+        public int violationsBeforeBlock() {
+            return violationsBeforeBlock;
+        }
+
+        public int blockSeconds() {
+            return blockSeconds;
+        }
+
+        public int ipv6Prefix() {
+            return ipv6Prefix;
+        }
+
+        public List<Addresses.Cidr> exempt() {
+            return exempt;
+        }
+
+        public int maxTracked() {
+            return maxTracked;
+        }
+
+        public int floodThreshold() {
+            return floodThreshold;
+        }
+    }
+
+    private static final class Key {
+        private final long hi;
+        private final long lo;
+
+        Key(long hi, long lo) {
+            this.hi = hi;
+            this.lo = lo;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            return o instanceof Key && ((Key) o).hi == hi && ((Key) o).lo == lo;
+        }
+
+        @Override
+        public int hashCode() {
+            return 31 * Long.hashCode(hi) + Long.hashCode(lo);
+        }
+    }
 
     private static final class Bucket {
         double tokens;

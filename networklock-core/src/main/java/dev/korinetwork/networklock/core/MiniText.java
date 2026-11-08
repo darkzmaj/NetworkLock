@@ -1,7 +1,9 @@
 package dev.korinetwork.networklock.core;
 
 import java.util.ArrayDeque;
+import java.util.Collections;
 import java.util.Deque;
+import java.util.HashMap;
 import java.util.Locale;
 import java.util.Map;
 
@@ -13,17 +15,17 @@ import java.util.Map;
  */
 public final class MiniText {
 
-    private static final Map<String, Character> COLORS = Map.ofEntries(
-            Map.entry("black", '0'), Map.entry("dark_blue", '1'), Map.entry("dark_green", '2'),
-            Map.entry("dark_aqua", '3'), Map.entry("dark_red", '4'), Map.entry("dark_purple", '5'),
-            Map.entry("gold", '6'), Map.entry("gray", '7'), Map.entry("grey", '7'), Map.entry("dark_gray", '8'),
-            Map.entry("dark_grey", '8'), Map.entry("blue", '9'), Map.entry("green", 'a'), Map.entry("aqua", 'b'),
-            Map.entry("red", 'c'), Map.entry("light_purple", 'd'), Map.entry("yellow", 'e'), Map.entry("white", 'f'));
+    private static final Map<String, Character> COLORS = map(
+            "black", '0', "dark_blue", '1', "dark_green", '2',
+            "dark_aqua", '3', "dark_red", '4', "dark_purple", '5',
+            "gold", '6', "gray", '7', "grey", '7', "dark_gray", '8',
+            "dark_grey", '8', "blue", '9', "green", 'a', "aqua", 'b',
+            "red", 'c', "light_purple", 'd', "yellow", 'e', "white", 'f');
 
-    private static final Map<String, Character> DECORATIONS = Map.ofEntries(
-            Map.entry("bold", 'l'), Map.entry("b", 'l'), Map.entry("italic", 'o'), Map.entry("i", 'o'),
-            Map.entry("em", 'o'), Map.entry("underlined", 'n'), Map.entry("u", 'n'),
-            Map.entry("strikethrough", 'm'), Map.entry("st", 'm'), Map.entry("obfuscated", 'k'), Map.entry("obf", 'k'));
+    private static final Map<String, Character> DECORATIONS = map(
+            "bold", 'l', "b", 'l', "italic", 'o', "i", 'o',
+            "em", 'o', "underlined", 'n', "u", 'n',
+            "strikethrough", 'm', "st", 'm', "obfuscated", 'k', "obf", 'k');
 
     private static final String[] AMPERSAND_TAGS = new String[128];
 
@@ -40,6 +42,12 @@ public final class MiniText {
     }
 
     private MiniText() {}
+
+    private static Map<String, Character> map(Object... pairs) {
+        Map<String, Character> m = new HashMap<>();
+        for (int i = 0; i < pairs.length; i += 2) m.put((String) pairs[i], (Character) pairs[i + 1]);
+        return Collections.unmodifiableMap(m);
+    }
 
     /**
      * Rewrites {@code &}-codes ({@code &a}, {@code &l}, {@code &#ff8800}) as MiniMessage tags, so

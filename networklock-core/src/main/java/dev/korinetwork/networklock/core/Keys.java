@@ -5,7 +5,6 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
 import java.util.Base64;
-import java.util.HexFormat;
 
 /** Proxy key encoding, generation and display-safe fingerprints. */
 public final class Keys {
@@ -51,10 +50,19 @@ public final class Keys {
             MessageDigest sha = MessageDigest.getInstance("SHA-256");
             sha.update("NetworkLock/key-fingerprint/v1".getBytes(StandardCharsets.US_ASCII));
             byte[] digest = sha.digest(key);
-            String hex = HexFormat.of().formatHex(digest, 0, 8);
+            String hex = hex(digest, 0, 8);
             return hex.substring(0, 4) + ":" + hex.substring(4, 8) + ":" + hex.substring(8, 12) + ":" + hex.substring(12);
         } catch (NoSuchAlgorithmException e) {
             throw new IllegalStateException(e);
         }
+    }
+
+    /** Lowercase hex of {@code bytes[from, to)}. */
+    static String hex(byte[] bytes, int from, int to) {
+        StringBuilder sb = new StringBuilder((to - from) * 2);
+        for (int i = from; i < to; i++) {
+            sb.append(Character.forDigit((bytes[i] >> 4) & 0xF, 16)).append(Character.forDigit(bytes[i] & 0xF, 16));
+        }
+        return sb.toString();
     }
 }

@@ -113,10 +113,18 @@ public final class Probe {
                 varInt(buf, 2);
             }), -1);
             UUID loginUuid = uuid != null ? uuid : UUID.nameUUIDFromBytes(("OfflinePlayer:" + name).getBytes(StandardCharsets.UTF_8));
-            send(out, packet(0x00, buf -> {
+            send(out, packet(0x00, buf -> { // Login Start has changed shape over the versions
                 string(buf, name);
-                buf.writeLong(loginUuid.getMostSignificantBits());
-                buf.writeLong(loginUuid.getLeastSignificantBits());
+                if (protocol == 759) buf.writeBoolean(false);           // 1.19: no signature data
+                if (protocol == 760) {                                  // 1.19.1-1.19.2
+                    buf.writeBoolean(false);
+                    buf.writeBoolean(true);
+                }
+                if (protocol >= 761 && protocol < 764) buf.writeBoolean(true); // 1.19.3-1.20.1: optional UUID
+                if (protocol >= 760) {
+                    buf.writeLong(loginUuid.getMostSignificantBits());
+                    buf.writeLong(loginUuid.getLeastSignificantBits());
+                }
             }), -1);
             int threshold = -1;
             boolean configuring = false;
@@ -141,6 +149,8 @@ public final class Probe {
                         case 0x01 -> { return "ONLINE-MODE (encryption requested)"; }
                         case 0x03 -> threshold = readVarInt(pin);
                         case 0x02 -> {
+                            // before 1.20.2 there is no configuration phase: Login Success means the server let us in
+                            if (protocol < 764) return "ACCEPTED (login success)";
                             configuring = true;
                             acceptAfter = System.currentTimeMillis() + 6_000;
                             s.setSoTimeout(6_500);
@@ -158,16 +168,19 @@ public final class Probe {
                         default -> { /* nothing else is expected during login */ }
                     }
                 } else {
-                    if (id == 0x02) return "REJECTED (configuration) " + printable(p);
-                    if (id == 0x03) return "ACCEPTED (backend reached finish-configuration)";
-                    if (id == 0x0E) { // select known packs: answer with none so the backend proceeds
+                    // 1.20.2-1.20.4 numbered the configuration packets one lower than 1.20.5+ (no cookie packet yet)
+                    boolean early = protocol < 766;
+                    int disconnect = early ? 0x01 : 0x02, finish = early ? 0x02 : 0x03, keepAlive = early ? 0x03 : 0x04;
+                    if (id == disconnect) return "REJECTED (configuration) " + printable(p);
+                    if (id == finish) return "ACCEPTED (backend reached finish-configuration)";
+                    if (!early && id == 0x0E) { // select known packs (1.20.5+): answer with none so the backend proceeds
                         final int t = threshold;
                         send(out, packet(0x07, buf -> varInt(buf, 0)), t);
                     }
-                    if (id == 0x04) { // keep alive
+                    if (id == keepAlive) {
                         long v = pin.readLong();
                         final int t = threshold;
-                        send(out, packet(0x04, buf -> buf.writeLong(v)), t);
+                        send(out, packet(early ? 0x03 : 0x04, buf -> buf.writeLong(v)), t);
                     }
                 }
             }

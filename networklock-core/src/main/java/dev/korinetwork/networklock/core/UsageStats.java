@@ -1,14 +1,11 @@
 package dev.korinetwork.networklock.core;
 
+import java.io.OutputStream;
+import java.net.HttpURLConnection;
 import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
-import java.time.Duration;
-import java.util.HexFormat;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -63,17 +60,27 @@ public final class UsageStats {
         if (!enabled.getAsBoolean()) return;
         String serverId = id.get();
         if (serverId == null) return;
+        HttpURLConnection conn = null;
         try {
-            HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
-            HttpRequest request = HttpRequest.newBuilder(ENDPOINT).timeout(Duration.ofSeconds(10))
-                    .header("Content-Type", "application/json")
-                    .header("User-Agent", "NetworkLock/" + version)
-                    .POST(HttpRequest.BodyPublishers.ofString(payload(serverId))).build();
-            client.send(request, HttpResponse.BodyHandlers.discarding());
+            byte[] body = payload(serverId).getBytes(StandardCharsets.UTF_8);
+            conn = (HttpURLConnection) ENDPOINT.toURL().openConnection();
+            conn.setConnectTimeout(10_000);
+            conn.setReadTimeout(10_000);
+            conn.setRequestMethod("POST");
+            conn.setInstanceFollowRedirects(false); // java.net.http never followed redirects by default
+            conn.setDoOutput(true);
+            conn.setRequestProperty("Content-Type", "application/json");
+            conn.setRequestProperty("User-Agent", "NetworkLock/" + version);
+            try (OutputStream out = conn.getOutputStream()) {
+                out.write(body);
+            }
+            conn.getResponseCode(); // the response is ignored
         } catch (Exception e) {
             // offline, or the API is not up yet: try again tomorrow
         } catch (Throwable t) {
             // never let stats affect the server
+        } finally {
+            if (conn != null) conn.disconnect();
         }
     }
 
@@ -95,7 +102,7 @@ public final class UsageStats {
                 sha.update((byte) 0);
                 sha.update(p.getBytes(StandardCharsets.UTF_8));
             }
-            return HexFormat.of().formatHex(sha.digest(), 0, 16);
+            return Keys.hex(sha.digest(), 0, 16);
         } catch (NoSuchAlgorithmException e) {
             throw new IllegalStateException(e);
         }

@@ -10,6 +10,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
@@ -38,18 +39,19 @@ public final class ConfigTree {
         try (Reader r = Files.newBufferedReader(path, StandardCharsets.UTF_8)) {
             doc = new Yaml(new SafeConstructor(options)).load(r);
         } catch (IOException e) {
-            throw new ConfigException(List.of(path.getFileName() + ": cannot read file (" + e.getClass().getSimpleName() + ")"));
+            throw new ConfigException(Collections.singletonList(path.getFileName() + ": cannot read file (" + e.getClass().getSimpleName() + ")"));
         } catch (RuntimeException e) {
             // SnakeYAML messages quote surrounding text, which could include a secret; report position only.
-            String where = e instanceof org.yaml.snakeyaml.error.MarkedYAMLException m && m.getProblemMark() != null
-                    ? " at line " + (m.getProblemMark().getLine() + 1) : "";
-            throw new ConfigException(List.of(path.getFileName() + ": invalid YAML" + where));
+            String where = e instanceof org.yaml.snakeyaml.error.MarkedYAMLException
+                    && ((org.yaml.snakeyaml.error.MarkedYAMLException) e).getProblemMark() != null
+                    ? " at line " + (((org.yaml.snakeyaml.error.MarkedYAMLException) e).getProblemMark().getLine() + 1) : "";
+            throw new ConfigException(Collections.singletonList(path.getFileName() + ": invalid YAML" + where));
         }
-        if (doc == null) doc = Map.of();
-        if (!(doc instanceof Map<?, ?> map)) {
-            throw new ConfigException(List.of(path.getFileName() + ": top level must be a mapping"));
+        if (doc == null) doc = Collections.emptyMap();
+        if (!(doc instanceof Map<?, ?>)) {
+            throw new ConfigException(Collections.singletonList(path.getFileName() + ": top level must be a mapping"));
         }
-        return new ConfigTree(map, path.getFileName().toString(), new ArrayList<>());
+        return new ConfigTree((Map<?, ?>) doc, path.getFileName().toString(), new ArrayList<>());
     }
 
     ConfigTree child(Map<?, ?> map, String prefix) {
@@ -59,8 +61,8 @@ public final class ConfigTree {
     Object raw(String path) {
         Object node = root;
         for (String part : path.split("\\.")) {
-            if (!(node instanceof Map<?, ?> m)) return null;
-            node = m.get(part);
+            if (!(node instanceof Map<?, ?>)) return null;
+            node = ((Map<?, ?>) node).get(part);
         }
         return node;
     }
@@ -80,9 +82,9 @@ public final class ConfigTree {
         Object v = raw(path);
         if (v == null) return def;
         String s;
-        if (v instanceof List<?> lines) {
+        if (v instanceof List<?>) {
             List<String> parts = new ArrayList<>();
-            for (Object line : lines) parts.add(String.valueOf(line));
+            for (Object line : (List<?>) v) parts.add(String.valueOf(line));
             s = String.join("\n", parts);
         } else if (v instanceof Map) {
             error(path, "must be text or a list of lines");
@@ -100,7 +102,7 @@ public final class ConfigTree {
     public boolean bool(String path, boolean def) {
         Object v = raw(path);
         if (v == null) return def;
-        if (v instanceof Boolean b) return b;
+        if (v instanceof Boolean) return (Boolean) v;
         error(path, "must be true or false");
         return def;
     }
@@ -108,17 +110,17 @@ public final class ConfigTree {
     public int integer(String path, int def, int min, int max) {
         Object v = raw(path);
         if (v == null) return def;
-        if (v instanceof Integer i && i >= min && i <= max) return i;
+        if (v instanceof Integer && (Integer) v >= min && (Integer) v <= max) return (Integer) v;
         error(path, "must be a whole number between " + min + " and " + max);
         return def;
     }
 
     public List<?> list(String path) {
         Object v = raw(path);
-        if (v == null) return List.of();
-        if (v instanceof List<?> l) return l;
+        if (v == null) return Collections.emptyList();
+        if (v instanceof List<?>) return (List<?>) v;
         error(path, "must be a list");
-        return List.of();
+        return Collections.emptyList();
     }
 
     public void error(String path, String message) {
@@ -126,6 +128,6 @@ public final class ConfigTree {
     }
 
     public void throwIfErrors() throws ConfigException {
-        if (!errors.isEmpty()) throw new ConfigException(List.copyOf(errors));
+        if (!errors.isEmpty()) throw new ConfigException(Collections.unmodifiableList(new ArrayList<>(errors)));
     }
 }

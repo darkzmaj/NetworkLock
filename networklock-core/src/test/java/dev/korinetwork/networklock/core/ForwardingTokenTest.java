@@ -95,4 +95,57 @@ class ForwardingTokenTest {
         assertThrows(IllegalArgumentException.class, () -> ForwardingToken.mint("p", KEY, "", ID, 1));
         assertThrows(IllegalArgumentException.class, () -> ForwardingToken.mint("p", KEY, "x".repeat(65), ID, 1));
     }
+
+    /**
+     * The 1.0.1 per-thread Mac reuse must produce exactly the MAC of the 1.0.0 algorithm, or tokens
+     * from a 1.0.0 proxy would be refused by a 1.0.1 server (and the other way round).
+     */
+    @Test
+    void optimisedMacIsByteIdenticalToTheOriginalAlgorithm() throws Exception {
+        byte[] key2 = Keys.decode(Keys.generate());
+        java.util.Random r = new java.util.Random(7);
+        for (int i = 0; i < 300; i++) {
+            List<PlayerIdentity.Property> props = new java.util.ArrayList<>();
+            for (int p = 0; p < i % 4; p++) {
+                props.add(new PlayerIdentity.Property("n" + r.nextInt(5), "v" + r.nextInt(1000), r.nextBoolean() ? "" : "s" + r.nextInt()));
+            }
+            PlayerIdentity id = new PlayerIdentity(new UUID(r.nextLong(), r.nextLong()), "Pé" + i, "198.51.100." + (i % 250), props);
+            byte[] key = i % 2 == 0 ? KEY : key2; // alternate keys: exercises the re-keying path
+            byte[] header = ForwardingToken.header("proxy-1", "lobby", 1000L + i, new byte[16]);
+            assertArrayEquals(reference(key, header, id), ForwardingToken.mac(key, header, id), "iteration " + i);
+        }
+        // an odd call (Mac.update ignores a null array) must not leave state behind for the next MAC on this thread
+        ForwardingToken.mac(KEY, null, ID);
+        byte[] header = ForwardingToken.header("proxy-1", "lobby", 5L, new byte[16]);
+        assertArrayEquals(reference(KEY, header, ID), ForwardingToken.mac(KEY, header, ID));
+    }
+
+    /** The 1.0.0 implementation, kept verbatim as the reference. */
+    private static byte[] reference(byte[] key, byte[] header, PlayerIdentity id) throws Exception {
+        javax.crypto.Mac hmac = javax.crypto.Mac.getInstance("HmacSHA256");
+        hmac.init(new javax.crypto.spec.SecretKeySpec(key, "HmacSHA256"));
+        hmac.update("NetworkLock/forwarding/v1\0".getBytes(java.nio.charset.StandardCharsets.US_ASCII));
+        hmac.update(header);
+        hmac.update(java.nio.ByteBuffer.allocate(16).putLong(id.uuid().getMostSignificantBits())
+                .putLong(id.uuid().getLeastSignificantBits()).array());
+        hmac.update(lp(id.name()));
+        hmac.update(lp(id.address()));
+        List<PlayerIdentity.Property> sorted = new java.util.ArrayList<>(id.properties());
+        sorted.removeIf(p -> p.name().equals(ForwardingToken.PROPERTY));
+        sorted.sort(java.util.Comparator.comparing(PlayerIdentity.Property::name)
+                .thenComparing(PlayerIdentity.Property::value).thenComparing(PlayerIdentity.Property::signature));
+        java.security.MessageDigest sha = java.security.MessageDigest.getInstance("SHA-256");
+        for (PlayerIdentity.Property p : sorted) {
+            sha.update(lp(p.name()));
+            sha.update(lp(p.value()));
+            sha.update(lp(p.signature()));
+        }
+        hmac.update(sha.digest());
+        return hmac.doFinal();
+    }
+
+    private static byte[] lp(String s) {
+        byte[] b = s.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        return java.nio.ByteBuffer.allocate(4 + b.length).putInt(b.length).put(b).array();
+    }
 }

@@ -14,7 +14,25 @@ public final class NonceCache {
 
     public enum Result { FRESH, REPLAY, FULL }
 
-    private record Key(long hi, long lo) {}
+    private static final class Key {
+        private final long hi;
+        private final long lo;
+
+        Key(long hi, long lo) {
+            this.hi = hi;
+            this.lo = lo;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            return o instanceof Key && ((Key) o).hi == hi && ((Key) o).lo == lo;
+        }
+
+        @Override
+        public int hashCode() {
+            return 31 * Long.hashCode(hi) + Long.hashCode(lo);
+        }
+    }
 
     private final ConcurrentHashMap<Key, Long> seen = new ConcurrentHashMap<>();
     private final AtomicInteger inserts = new AtomicInteger();
@@ -24,15 +42,25 @@ public final class NonceCache {
         this.maxEntries = maxEntries;
     }
 
-    public Result use(byte[] nonce, long expiresAtMillis, long nowMillis) {
-        if ((inserts.incrementAndGet() & 1023) == 0 || seen.size() >= maxEntries) purge(nowMillis);
-        if (seen.size() >= maxEntries) return Result.FULL;
+    /**
+     * @param issuedAtMillis  when the token was issued
+     * @param retentionMillis how long a token stays acceptable after issue under the CURRENT settings
+     *                        (lifetime + clock skew). Entries are kept by issue time and purged with the
+     *                        current retention, so raising the token lifetime by reload never lets an
+     *                        already-used token be accepted again.
+     */
+    public Result use(byte[] nonce, long issuedAtMillis, long nowMillis, long retentionMillis) {
         ByteBuffer b = ByteBuffer.wrap(nonce);
-        return seen.putIfAbsent(new Key(b.getLong(), b.getLong()), expiresAtMillis) == null ? Result.FRESH : Result.REPLAY;
+        Key key = new Key(b.getLong(), b.getLong());
+        if ((inserts.incrementAndGet() & 1023) == 0 || seen.size() >= maxEntries) purge(nowMillis, retentionMillis);
+        if (seen.containsKey(key)) return Result.REPLAY;
+        if (seen.size() >= maxEntries) return Result.FULL;
+        // putIfAbsent is the atomic decision: of two simultaneous uses of one token, only one gets FRESH
+        return seen.putIfAbsent(key, issuedAtMillis) == null ? Result.FRESH : Result.REPLAY;
     }
 
-    void purge(long nowMillis) {
-        seen.values().removeIf(expiry -> expiry <= nowMillis);
+    void purge(long nowMillis, long retentionMillis) {
+        seen.values().removeIf(issued -> issued + retentionMillis <= nowMillis);
     }
 
     public int size() {

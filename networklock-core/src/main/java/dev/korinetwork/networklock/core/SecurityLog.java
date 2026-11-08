@@ -38,6 +38,20 @@ public final class SecurityLog {
         }
     }
 
+    /**
+     * Makes attacker-supplied text (player names from a direct connection) safe for one log line:
+     * old servers do not validate names, so line breaks or terminal escapes could forge log entries.
+     */
+    public static String clean(String s) {
+        if (s == null) return "null";
+        StringBuilder out = new StringBuilder(Math.min(s.length(), 32));
+        for (int i = 0; i < s.length() && out.length() < 32; i++) {
+            char c = s.charAt(i);
+            out.append(c >= 0x20 && c < 0x7F ? c : '?');
+        }
+        return out.toString();
+    }
+
     /** IPv4 keeps the first two octets, IPv6 the first three groups. */
     public static String address(String normalized, boolean redact) {
         if (!redact || normalized.isEmpty()) return normalized;
