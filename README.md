@@ -46,8 +46,6 @@ Once a day NetworkLock tells kori.my that one more server runs it: an anonymous 
 
 [![Join our Discord: darkzmaj.eu/discord](https://kori.my/assets/img/brand/discord-banner.png)](https://darkzmaj.eu/discord)
 
-![© 2026 DarkZmaj · KORI Network](https://kori.my/assets/img/brand/copyright.png)
-
 Free and open source under the MIT licence. Made by DarkZmaj for KORI Network.
 
 ## For developers
