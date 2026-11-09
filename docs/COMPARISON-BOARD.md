@@ -18,8 +18,8 @@ Legend: ✅ full marks · ⚠️ partial · ❌ missing · ⏭️ not tested her
 | Fails closed (bad config, errors, unknown server type) | 5 | ⚠️ 3 — refuses on missing config; errors logged | ⚠️ 3 — NL-01 (reload reopens replay), NL-04 (kick failure) | ✅ 5 |
 | Safe logging (no secrets, no log forging, flood cap) | 4 | ⚠️ 2 — wrong tokens logged (base64), stack trace per bad handshake | ⚠️ 2 — names logged raw (NL-02) | ✅ 4 |
 | Resists other plugins re-allowing a refused login | 2 | ❌ 0 | ✅ 2 | ✅ 2 |
-| Credential removed from the live profile | 2 | ✅ 2 | ⚠️ 1 — not on Sponge | ⚠️ 1 — not on Sponge / Spigot 1.20.2+ |
-| **Subtotal** | **40** | **15** | **35** | **🏆 39** |
+| Credential removed from the live profile | 2 | ✅ 2 | ⚠️ 1 — not on Sponge | ✅ 2 — verified on a joined player on all 23 servers, Sponge and Spigot 1.21.9+ included |
+| **Subtotal** | **40** | **15** | **35** | **🏆 40** |
 
 ### Compatibility (20)
 
@@ -58,7 +58,7 @@ Tie on points; BungeeGuard keeps the trophy for doing no work at all on the prox
 
 | Criterion | Pts | BungeeGuard 1.4.0 | NL 1.0.0 | NL 1.0.1 |
 |---|---|---|---|---|
-| Automated tests (unit + real servers) | 4 | ❌ 0 — no test files in the GitHub repository | ⚠️ 3 — 36 unit, 9 servers | ✅ 4 — 45 unit, 23 servers, 2 full networks |
+| Automated tests (unit + real servers) | 4 | ❌ 0 — no test files in the GitHub repository | ⚠️ 3 — 36 unit, 9 servers | ✅ 4 — 55 unit, 23 servers with a real join, 2 full networks, BungeeCord checks, 3-hour soak |
 | No outgoing network connections | 3 | ✅ 3 | ✅ 3 | ⚠️ 2 — update check and anonymous stats, both opt-out |
 | Code size / reviewability | 3 | ✅ 3 — very small | ⚠️ 2 | ⚠️ 2 |
 | **Subtotal** | **10** | **6** | **🏆 8** | **🏆 8** |
@@ -69,12 +69,23 @@ Both NetworkLock versions tie here: 1.0.1 has more tests, 1.0.0 had no outgoing 
 
 | | BungeeGuard 1.4.0 | NL 1.0.0 | NL 1.0.1 |
 |---|---|---|---|
-| Security (40) | 15 | 35 | **39** 🏆 |
+| Security (40) | 15 | 35 | **40** 🏆 |
 | Compatibility (20) | 16 | 12 | **20** 🏆 |
 | Performance (15) | **14** 🏆 | 14 | 14 |
 | Operations (15) | 10 | 9 | **11** 🏆 |
 | Quality and privacy (10) | 6 | **8** 🏆 | **8** 🏆 |
-| **Total (100)** | **61** | **78** | **92** 🏆 |
+| **Total (100)** | **61** | **78** | **93** 🏆 |
+
+### What changed since the first scoring (92 → 93)
+
+Re-scored with the same rubric after the second audit pass. One criterion moved, on evidence: NetworkLock 1.0.1 now removes the used signature from the live profile on Sponge and Spigot 1.21.9+ as well, checked on a really joined player on every server in the matrix (+1). The other second-pass fixes (BungeeCord unused-signature leftovers, limiter flood behaviour, replay memory on resizing reloads, privacy of the stats ID) correct defects inside criteria NetworkLock already had full marks for, so they do not add points; they make those marks deserved. Performance stays at 14: the 100 logins/s question was traced to Paper's own join limit, which affects every setup alike, so there is no gain to score. BungeeGuard's score is unchanged.
+
+## Verified, assumed, untested
+
+- **Verified by measurement or on real servers:** every NetworkLock score; BungeeGuard's security, logging and performance scores (its release jar was run in the benchmarks and its bytecode/source read); BungeeGuard's `folia-supported: true` declaration and its lack of tests (GitHub repository).
+- **From documentation, not tested here (⏭️):** BungeeGuard on 1.8–1.20 servers, on Spigot with ProtocolLib, and on Folia.
+- **Not covered by the rubric:** residual risks shared by both designs (someone on the proxy-to-server link, a stolen key, a compromised backend, the plugin being removed), the 30-second race window for a captured NetworkLock signature, and replay memory being lost on restart (NL-08).
+- **Known limits of the evidence:** one Windows test machine, synthetic offline players, a 3-hour (not multi-day) soak, no outside security review.
 
 ## Recommendation for a 200-player network
 

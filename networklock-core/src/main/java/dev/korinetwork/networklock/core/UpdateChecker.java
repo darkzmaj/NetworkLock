@@ -66,7 +66,7 @@ public final class UpdateChecker {
             try (InputStream in = conn.getInputStream()) {
                 ByteArrayOutputStream buf = new ByteArrayOutputStream();
                 byte[] chunk = new byte[8192];
-                for (int n; (n = in.read(chunk)) != -1; ) buf.write(chunk, 0, n);
+                for (int n; (n = in.read(chunk)) != -1 && buf.size() < 256 * 1024; ) buf.write(chunk, 0, n); // bounded
                 body = new String(buf.toByteArray(), StandardCharsets.UTF_8);
             }
             String found = parseTag(body);
@@ -86,7 +86,7 @@ public final class UpdateChecker {
 
     public Status status() {
         String l = latest;
-        if (!enabled.getAsBoolean() || l == null) return Status.UNKNOWN;
+        if (!enabled.getAsBoolean() || l == null || !current.matches("\\d+(\\.\\d+)*(-.*)?")) return Status.UNKNOWN; // own version unreadable
         return isNewer(l, current) ? Status.OUTDATED : Status.LATEST;
     }
 

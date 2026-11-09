@@ -1,6 +1,6 @@
 # Security audit: NetworkLock 1.0.1
 
-Audited: NetworkLock `main` at `859578f` (1.0.1-dev, tag `v1.0.1-dev` = `b545ac9` plus one docs commit), compared with v1.0.0 (`424ffb1`) and BungeeGuard v1.4.0 (`c254f72`, release jar SHA-256 `f2f3a3df…7e1d47`). Date: 2026-11-08.
+Audited: NetworkLock 1.0.1-dev (`859578f`), then the first 1.0.1 build (`6f6daa7`), compared with v1.0.0 (`424ffb1`) and BungeeGuard v1.4.0 (`c254f72`, release jar SHA-256 `f2f3a3df…7e1d47`). Dates: 2026-11-08 (first pass) and 2026-11-09 (second pass: an independent full-code review, then every finding re-checked against the code and, where it involves a server, on real servers).
 
 Method: line-by-line review of every authentication, configuration and platform file; regression tests for each fix; attack simulations against real servers on localhost (see [TEST-REPORT.md](TEST-REPORT.md)). Passing tests show that the tested attacks fail. They do not prove there are no other vulnerabilities.
 
@@ -14,9 +14,17 @@ Method: line-by-line review of every authentication, configuration and platform 
 | NL-04 | Low | A failure while building the kick message would end the event handler without refusing the login | Fixed in 1.0.1 |
 | NL-05 | Low | The replay cache reported "full" instead of "replay" for a used signature when full (still refused) | Fixed in 1.0.1 |
 | NL-06 | High (availability) | 1.0.0 could not load on any server below 1.21, and refused every player on Spigot/CraftBukkit | Fixed in 1.0.1 |
-| NL-07 | Info | Sponge, and authlib on 1.20.2+ Spigot, do not let plugins remove the used signature from the profile | Accepted, documented |
+| NL-07 | Low | On Sponge and Spigot 1.21.9+ (read-only profiles) the used signature stayed in the player's live profile | Fixed in 1.0.1 (second pass) |
 | NL-08 | Info | Replay memory is per server and lost on restart | Design limitation, documented |
 | NL-09 | Info | Update check and usage statistics contact GitHub and api.kori.my | Documented, both can be turned off |
+| NL-10 | Medium | BungeeCord/Waterfall: a connect that never happened (already on that server, already connecting, cancelled later, server down) left a fresh, unused signature on the player's proxy profile for up to 30 s | Fixed in 1.0.1 (second pass) |
+| NL-11 | Medium (availability) | A wide login flood that filled the proxy's address table made every new address scan the whole table | Fixed in 1.0.1 (second pass) |
+| NL-12 | Low | A reload that changed `replay-cache-max-entries` started an empty replay memory, so signatures used in the last ~35 s worked once more | Fixed in 1.0.1 (second pass) |
+| NL-13 | Low (privacy) | With `updates.check: false` but a broken config at startup, the update check still contacted GitHub | Fixed in 1.0.1 (second pass) |
+| NL-14 | Low (privacy) | The anonymous statistics ID could be computed from the key fingerprint printed in logs and commands | Fixed in 1.0.1 (second pass) |
+| NL-15 | Low | Sponge: a login cancelled by an earlier plugin was not checked, so a later plugin un-cancelling it let it through unchecked | Fixed in 1.0.1 (second pass) |
+| NL-16 | Info | After a plugin reload by a plugin manager, pooled threads kept the old plugin's classloader and a key reference alive | Fixed in 1.0.1 (second pass) |
+| NL-17 | Info | Misleading diagnostics: false "disabled while running" on every Spigot shutdown, locale-dependent text, unsignable server names reported as "not via proxy", bad `server-id` values only failing at login, a false shared-key warning, OUTDATED for an unknown own version | Fixed in 1.0.1 (second pass) |
 
 ### NL-01: replay window reopened by a reload (Medium)
 
@@ -50,9 +58,11 @@ When the replay cache was at its limit, a replayed signature got `REPLAY_CACHE_F
 
 Fix: core and the Bukkit side are now compiled for Java 8, `api-version` is `1.13` (ignored below 1.13), and servers without the Paper profile API use a new check in `PlayerLoginEvent` that reads the forwarded profile from the server's own `GameProfile`. That event fires before the player joins the world on every version from 1.8 to today, and needs no ProtocolLib. Verified on real servers from 1.8.8 to 26.3 (see COMPATIBILITY-REPORT).
 
-### NL-07: used signature stays in the profile on some servers (Info)
+### NL-07: used signature stayed in the live profile on some servers (Low, fixed)
 
-Sponge game profiles are read-only to plugins. On Spigot 1.20.2+ the authlib property map is read-only too. There the used signature stays in the player's profile and can be shown to other players (tab list). It is worthless to them: it is bound to that player and server, expired within 30 seconds, and already marked as used. On Paper, and on Spigot before 1.20.2, it is removed.
+Sponge's API exposes profiles read-only, and authlib 7 (Spigot 1.21.9+) made the profile and its property map immutable records. In the first 1.0.1 build the used signature therefore stayed in the joined player's profile on those servers, where it could be sent to other players' tab lists. It was already used, bound to that player and server, and expired within 30 s, so it could not be replayed, but it should not be there.
+
+Fix: `ProfileScrubber` builds a copy of the profile without the signature and swaps it into the server objects that hold exactly the original instance: the player entity on Spigot (in `PlayerLoginEvent`), and Minecraft's login listener plus Sponge's connection object on Sponge (in the Auth event, before the player entity is created). If anything does not fit on some future version, it changes nothing and the old behaviour remains. Verified on real servers by a full join with a fresh signature and a check of the joined player's live profile: Spigot 1.21.11, SpongeVanilla 1.21.11 and 26.3, and every other server in the matrix. The signature is still in the login-success packet the server sends to that player's own client, which received it from the proxy anyway.
 
 ### NL-08: replay memory is per server and not persistent (Info)
 
@@ -61,6 +71,32 @@ Each game server remembers used nonces in memory for the token lifetime (35 s by
 ### NL-09: outgoing connections (Info)
 
 The update check (GitHub API, every 12 h) and usage statistics (api.kori.my, every 24 h) reveal the server's IP address to those services. The statistics send only an anonymous one-way ID, the version and the platform. Both are on by default and can be turned off (`updates.check`, `metrics.enabled`).
+
+### NL-10: unused signature left on BungeeCord profiles (Medium, fixed)
+
+BungeeCord fires `ServerConnectEvent` before it checks whether the player is already on, or already connecting to, the target (verified in Waterfall's `UserConnection.connect0` bytecode). NetworkLock signed the connection in that event and removed the signature only on `ServerConnectedEvent` or `ServerKickEvent`. A connect that then did not happen (`/server lobby` while on lobby, a second request while connecting, a later plugin cancelling, a backend that is down) left a valid, never-used signature on the player's proxy profile for its lifetime. Proxy tab-list handlers or other plugins could relay it; with legacy forwarding an attacker who can reach the backend directly could use it once to log in as that player.
+
+Fix: no signature for a connect to the server the player is already on (BungeeCord's own check), and a safety net that removes exactly that signature after the connect timeout plus 2 s. BungeeCord reads the profile as soon as the TCP connection opens, so by then it was either sent or never will be. Profile changes are synchronized per player, so the safety net never removes a newer signature. Velocity checks "already connected" before firing its event; NetworkLock now also skips signing when another plugin redirects a player to the server they are already on.
+
+### NL-11: connection-limiter sweep storm (Medium, availability, fixed)
+
+When the proxy's address table was full (default 100,000) and no entry had been idle for a full window, every connection from a new address ran a full sweep of the table. Fix: at most one sweep per second, claimed atomically. Memory stays bounded because a full table already lets untracked addresses pass without storing them. Regression test: `ReviewFixesTest.limiterSweepsAtMostOncePerSecondWhenFull`.
+
+### NL-12: replay memory reset by a resizing reload (Low, fixed)
+
+A reload that changed `replay-cache-max-entries` replaced the replay memory with an empty one, and a login being checked during any reload wrote into the old one. Fix: one replay memory for the plugin's lifetime; a reload changes its capacity in place. Regression test: `ReviewFixesTest.replayCacheSurvivesAReloadThatResizesIt`.
+
+### NL-13 and NL-14: privacy of the optional connections (Low, fixed)
+
+The update check treated "no config loaded" as "on", so an owner who had opted out but had a config error at startup was still checked against GitHub until a reload succeeded; it is now off without a config, like the statistics. The statistics ID was a hash of the public key fingerprint (printed at startup and in `/networklock status`), so anyone with a pasted log could compute it; it is now derived from the secret key bytes. What is sent did not change: the update check is an HTTPS GET to the GitHub API every 12 h (response capped at 256 KB, redirects off, 10 s timeouts); the statistics are one HTTPS POST a day with the anonymous ID, plugin version, platform and side. Turning either off (also by reload) stops all traffic; no other data leaves the server. The two scheduler threads still exist while opted out; they sleep and send nothing.
+
+### NL-15 to NL-17 (Low/Info, fixed)
+
+Sponge now checks logins that an earlier listener cancelled (`@IsCancelled(UNDEFINED)`), so a later plugin un-cancelling them cannot skip the check. The per-thread crypto cache holds only JDK objects, so threads that outlive a plugin reload do not keep NetworkLock's classloader alive. The diagnostics fixes are listed in the table; each has a regression test in `ReviewFixesTest` where it is testable without a server.
+
+### Known, not changed
+
+- A proxy reload rebuilds the login limiter, which clears temporary IP blocks. Only an admin can reload; keeping the state would add complexity without a security benefit.
 
 ## Threat model
 
@@ -84,7 +120,7 @@ Attacker positions: **D** = can reach the game server port directly; **N** = can
 | T14 | Brute-force the key or MAC | D | Infeasible (256-bit key, 256-bit MAC) | Infeasible for a 64-hex token |
 | T15 | Timing attack on MAC compare | D | Constant-time compare, all keys tried | String set lookup (hash-based, not exploitable in practice) |
 | T16 | Field-shifting / length-extension on the MAC input | D | Prevented (HMAC, length prefixes, domain string) | n/a |
-| T17 | Signature leaks to other players via profile (tab list) | P | Removed on Paper and Spigot < 1.20.2; elsewhere useless (used, bound, expired) (NL-07) | Token removed from the properties on both paths |
+| T17 | Signature leaks to other players via profile (tab list) | P | Removed from the live profile on every tested server, Sponge and Spigot 1.21.9+ included (NL-07); unused proxy-side leftovers removed (NL-10) | Token removed from the properties on both paths |
 | T18 | Another plugin re-allows a refused login | S | Refused again at MONITOR priority | Not re-checked |
 | T19 | Log line forging through player name | D | Cleaned (NL-02 fixed) | Safe: connection details are logged base64-encoded |
 | T20 | Console flood with refused logins | D | 20 lines per 10 s cap | One line (plus stack trace on bad handshake) per attempt |

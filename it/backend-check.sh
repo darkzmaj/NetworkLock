@@ -69,15 +69,43 @@ if [ "$EXPECT" = "deny-all" ]; then
 else
     check "valid token accepted" "ACCEPTED" "$R"
     [[ "$R" == *"replay: REJECTED"*"NL-04"* ]] && echo "PASS  replay rejected (NL-04)" || { echo "FAIL  replay: $R"; FAILED=1; }
-    if [ "$SPONGE" = 1 ]; then
-        echo "SKIP  credential strip (Sponge profiles are read-only; a used credential cannot be replayed)"
-    elif grep -q "left in (read-only)" "$S/console.log"; then
+    if grep -q "left in (read-only)" "$S/console.log"; then
         echo "INFO  credential left in a read-only profile on this version (used, so it cannot be replayed)"
     elif grep -q "still present" "$S/console.log"; then
         echo "FAIL  credential reached the live profile"; FAILED=1
+    elif grep -q "Used credential removed from the profile" "$S/console.log"; then
+        echo "PASS  credential removed from the live profile (read back)"
     else
-        echo "PASS  credential stripped from profile"
+        echo "FAIL  no confirmation that the credential was removed"; FAILED=1
     fi
+    # a full join with a fresh signature: the joined player's live profile must not carry it
+    J=$(java -Djoin=true -Dproto="$PROTO" -cp "$CP" Probe 127.0.0.1 35570 Jeb token 5b1c2d3e-4f50-4a61-8b72-93a4b5c6d7e8 proxy-1 "$KEY" lobby 127.0.0.1 | tr '\n' ' ')
+    sleep 2
+    if [[ "$J" != ACCEPTED*"+joined"* ]]; then
+        echo "FAIL  full join: $J"; FAILED=1
+    elif grep -q "still present" "$S/console.log"; then
+        echo "FAIL  credential present on the joined player's profile"; FAILED=1
+    elif grep -q "Credential absent at join for Jeb" "$S/console.log"; then
+        echo "PASS  credential absent from the joined player's profile"
+    else
+        echo "FAIL  no join-time confirmation"; FAILED=1
+    fi
+fi
+if [ "$EXPECT" != "deny-all" ]; then
+    # key rotation without downtime, waiting for the server to confirm each reload (no race with the probe)
+    reload() {
+        local n; n=$(grep -c "Configuration reloaded" "$S/console.log")
+        echo "nlock reload" >> "$S/cmd.txt"
+        for _ in $(seq 1 30); do [ "$(grep -c "Configuration reloaded" "$S/console.log")" -gt "$n" ] && return 0; sleep 1; done
+        return 1
+    }
+    KEY2=$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '=\n')
+    sed -i "s/keys: \[\"$KEY\"\]/keys: [\"$KEY\", \"$KEY2\"]/" "$DATA/config.yml"
+    reload || echo "FAIL  reload not confirmed"
+    check "new key accepted after it was added" "ACCEPTED" "$(probe Rot1 token 6e0b2a4c-1d3f-4a5b-9c7d-8e9f0a1b2c3d proxy-1 "$KEY2" lobby 127.0.0.1)"
+    sed -i "s/keys: \[\"$KEY\", \"$KEY2\"\]/keys: [\"$KEY2\"]/" "$DATA/config.yml"
+    reload || echo "FAIL  reload not confirmed"
+    check "removed key refused right after the reload" "REJECTED" "$(probe Rot2 token 7f1c3b5d-2e4a-4b6c-8d8e-9fa0b1c2d3e4 proxy-1 "$KEY" lobby 127.0.0.1)"
 fi
 echo "nlock doctor" >> "$S/cmd.txt"; sleep 3
 if [ "$EXPECT" = "deny-all" ]; then

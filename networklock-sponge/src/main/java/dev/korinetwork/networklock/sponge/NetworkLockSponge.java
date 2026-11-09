@@ -15,6 +15,8 @@ import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
 import org.spongepowered.api.event.lifecycle.StoppingEngineEvent;
 import dev.korinetwork.networklock.core.Outcome;
 import dev.korinetwork.networklock.core.PlayerIdentity;
+import dev.korinetwork.networklock.core.ProfileScrubber;
+import dev.korinetwork.networklock.core.SecurityLog;
 import net.kyori.adventure.text.Component;
 import org.apache.logging.log4j.Logger;
 import org.spongepowered.api.command.Command;
@@ -48,8 +50,8 @@ import java.util.regex.Pattern;
 
 /**
  * Sponge entry point, declared in {@code META-INF/sponge_plugins.json}. Players are checked in
- * {@link ServerSideConnectionEvent.Auth}, before the player exists on the server. Sponge game
- * profiles are read-only, so the (already used, single-use) credential stays in the profile.
+ * {@link ServerSideConnectionEvent.Auth}, before the player exists on the server, and the used
+ * credential is removed from the profile the server will build the player from.
  */
 @Plugin("networklock")
 public final class NetworkLockSponge {
@@ -112,6 +114,7 @@ public final class NetworkLockSponge {
     }
 
     @Listener(order = Order.FIRST)
+    @IsCancelled(Tristate.UNDEFINED) // also check logins an earlier listener cancelled, in case a later one un-cancels them
     public void verify(ServerSideConnectionEvent.Auth event) {
         Outcome outcome;
         try {
@@ -127,6 +130,11 @@ public final class NetworkLockSponge {
             PlayerIdentity identity = new PlayerIdentity(event.profile().uuid(), event.profile().name().orElse(""),
                     Addresses.normalize(event.connection().address()), others);
             outcome = core.verify(identity, tokens);
+            if (!tokens.isEmpty()) {
+                boolean removed = scrub(event);
+                if (core.debug()) logger.info("Used credential {} the profile of {}", removed ? "removed from" : "left in (read-only)",
+                        SecurityLog.clean(identity.name()));
+            }
         } catch (Throwable t) {
             logger.error("Error verifying a login (denied): {}", t.toString());
             outcome = Outcome.INTERNAL_ERROR;
@@ -137,6 +145,18 @@ public final class NetworkLockSponge {
         }
     }
 
+    /** Debug self-check: the joined player's live profile must not carry the credential. */
+    @Listener(order = Order.LAST)
+    public void checkStripped(ServerSideConnectionEvent.Join event) {
+        if (!core.debug()) return;
+        String name = SecurityLog.clean(event.player().name());
+        if (event.player().profile().properties().stream().anyMatch(p -> ForwardingToken.PROPERTY.equals(p.name()))) {
+            logger.error("Connection credential still present on {}'s profile; please report this with your server version", name);
+        } else {
+            logger.info("Credential absent at join for {}", name);
+        }
+    }
+
     @Listener(order = Order.LAST)
     @IsCancelled(Tristate.UNDEFINED)
     public void enforce(ServerSideConnectionEvent.Auth event) {
@@ -144,6 +164,29 @@ public final class NetworkLockSponge {
         if (outcome != null && !event.isCancelled()) {
             logger.warn("Another plugin re-allowed a login NetworkLock denied; denying again");
             deny(event, outcome);
+        }
+    }
+
+    /**
+     * Sponge profiles are read-only through its API. The login listener keeps the Mojang profile it
+     * will build the player from; a copy without the credential replaces it there and on Sponge's
+     * connection object. Returns whether the listener's profile is clean afterwards.
+     */
+    private static boolean scrub(ServerSideConnectionEvent.Auth event) {
+        try {
+            Object connection = event.connection();
+            Object network = ProfileScrubber.findField(connection, "network.Connection");
+            Object listener = network == null ? null : ProfileScrubber.findField(network, "LoginPacketListenerImpl");
+            Object profile = listener == null ? null : ProfileScrubber.findField(listener, "authlib.GameProfile");
+            Object clean = profile == null ? null : ProfileScrubber.withoutCredential(profile);
+            if (clean == null) return false;
+            if (clean != profile) {
+                ProfileScrubber.replaceReferences(listener, profile, clean);
+                ProfileScrubber.replaceReferences(connection, profile, clean);
+            }
+            return !ProfileScrubber.hasCredential(ProfileScrubber.findField(listener, "authlib.GameProfile"));
+        } catch (ReflectiveOperationException | RuntimeException | LinkageError e) {
+            return false; // the credential is single-use, so leaving it is harmless
         }
     }
 
@@ -159,7 +202,7 @@ public final class NetworkLockSponge {
             Matcher module = FORWARDING_MODULE.matcher(conf);
             Matcher mode = FORWARDING_MODE.matcher(conf);
             boolean enabled = module.find() && module.group(1).equalsIgnoreCase("true");
-            String m = mode.find() ? mode.group(1).toUpperCase() : "NONE";
+            String m = mode.find() ? mode.group(1).toUpperCase(java.util.Locale.ROOT) : "NONE";
             if (!enabled || m.equals("NONE")) {
                 out.add("FAIL proxy forwarding is off (sponge.conf: modules.ip-forwarding=true and ip-forwarding.mode"
                         + " LEGACY or MODERN); players cannot be verified and every login is denied");

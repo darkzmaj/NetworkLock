@@ -51,6 +51,7 @@ public final class ProxyCore {
     private final LongSupplier clock;
     private final Map<String, String> env;
     private final LongAdder minted = new LongAdder();
+    private final java.util.Set<String> badTargets = java.util.concurrent.ConcurrentHashMap.newKeySet();
     private final LongAdder limited = new LongAdder();
     private final LongAdder blocked = new LongAdder();
     private final LongAdder lockdownDenied = new LongAdder();
@@ -143,12 +144,25 @@ public final class ProxyCore {
     }
 
     /** A fresh token for one backend connection, or null while in lockdown. */
+    /** Whether debug logging is on in the active config. */
+    public boolean debug() {
+        Active a = active;
+        return a != null && a.settings().logging().debug();
+    }
+
     public String mint(PlayerIdentity identity, String targetServer) {
         Active a = active;
         if (a == null) return null;
+        if (!ForwardingToken.isValidTarget(targetServer)) {
+            if (badTargets.add(String.valueOf(targetServer))) {
+                log.error("Server name '" + SecurityLog.clean(String.valueOf(targetServer)) + "' cannot be signed (it must be 1 to 64"
+                        + " characters without control characters); rename it in the proxy config. Players are refused there.");
+            }
+            return null;
+        }
         String token = ForwardingToken.mint(a.settings().networkId(), a.settings().key(), targetServer, identity, clock.getAsLong());
         minted.increment();
-        if (a.settings().logging().debug()) log.info("Signed connection of " + identity.name() + " to " + targetServer);
+        if (a.settings().logging().debug()) log.info("Signed connection of " + SecurityLog.clean(identity.name()) + " to " + targetServer);
         return token;
     }
 
@@ -172,10 +186,10 @@ public final class ProxyCore {
         return active == null;
     }
 
-    /** Whether update checks are on; true while no config is loaded. */
+    /** Whether update checks are on; off while no config is loaded. */
     public boolean updatesEnabled() {
         Active a = active;
-        return a == null || a.settings().updates().check();
+        return a != null && a.settings().updates().check(); // no config loaded: the owner's choice is unknown, so stay quiet
     }
 
     public boolean metricsEnabled() {
@@ -186,7 +200,7 @@ public final class ProxyCore {
     /** Anonymous ID for the usage counter, derived one-way from the proxy key; null while in lockdown. */
     public String usageId() {
         Active a = active;
-        return a == null ? null : UsageStats.anonymousId("proxy", a.settings().keyFingerprint());
+        return a == null ? null : UsageStats.anonymousId(Collections.singletonList(a.settings().key()), "proxy");
     }
 
     /** Whether staff are told about new versions when they join. */

@@ -110,8 +110,10 @@ public final class BackendCore {
         }
         Active previous = active;
         // keep remembered nonces across reloads, otherwise a reload would reopen the replay window
-        NonceCache cache = previous != null && previous.nonces().capacity() == s.replayCacheMax()
-                ? previous.nonces() : new NonceCache(s.replayCacheMax());
+        // one cache for the plugin's lifetime: a reload (even one that changes its size) and logins still in
+        // flight during the reload must never forget a used token
+        NonceCache cache = previous != null ? previous.nonces() : new NonceCache(s.replayCacheMax());
+        cache.capacity(s.replayCacheMax());
         active = new Active(s, cache);
         lockdownReason = null;
         for (String w : s.warnings()) log.warn(w);
@@ -223,10 +225,10 @@ public final class BackendCore {
         return custom != null ? custom : outcome.code().backendMessage();
     }
 
-    /** Whether update checks are on; true while no config is loaded. */
+    /** Whether update checks are on; off while no config is loaded. */
     public boolean updatesEnabled() {
         Active a = active;
-        return a == null || a.settings().updates().check();
+        return a != null && a.settings().updates().check(); // no config loaded: the owner's choice is unknown, so stay quiet
     }
 
     public boolean metricsEnabled() {
@@ -234,13 +236,13 @@ public final class BackendCore {
         return a != null && a.settings().updates().metrics();
     }
 
-    /** Anonymous ID for the usage counter, derived one-way from server-id and key fingerprints; null in lockdown. */
+    /** Anonymous ID for the usage counter, derived one-way from server-id and the (secret) trusted keys; null in lockdown. */
     public String usageId() {
         Active a = active;
         if (a == null) return null;
-        List<String> parts = new ArrayList<>(Arrays.asList("server", a.settings().serverId()));
-        a.settings().proxies().keySet().stream().sorted().forEach(p -> parts.addAll(a.settings().fingerprints(p)));
-        return UsageStats.anonymousId(parts.toArray(new String[0]));
+        List<byte[]> keys = new ArrayList<>();
+        a.settings().proxies().keySet().stream().sorted().forEach(p -> keys.addAll(a.settings().proxies().get(p).keys()));
+        return UsageStats.anonymousId(keys, "server", a.settings().serverId());
     }
 
     public int trustedProxyCount() {
@@ -282,8 +284,10 @@ public final class BackendCore {
         List<String> out = new ArrayList<>();
         for (Map.Entry<Outcome, LongAdder> e : outcomes.entrySet()) {
             long n = e.getValue().sum();
-            if (n > 0 || e.getKey() == Outcome.OK) out.add(e.getKey().name().toLowerCase() + ": " + n);
+            if (n > 0 || e.getKey() == Outcome.OK) out.add(e.getKey().name().toLowerCase(java.util.Locale.ROOT) + ": " + n);
         }
+        Active a = active;
+        if (a != null) out.add("replay memory: " + a.nonces().size() + " / " + a.nonces().capacity());
         return out;
     }
 

@@ -6,6 +6,7 @@ import dev.korinetwork.networklock.core.ForwardingToken;
 import dev.korinetwork.networklock.core.MiniText;
 import dev.korinetwork.networklock.core.Outcome;
 import dev.korinetwork.networklock.core.PlayerIdentity;
+import dev.korinetwork.networklock.core.ProfileScrubber;
 import dev.korinetwork.networklock.core.SecurityLog;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
@@ -74,7 +75,7 @@ final class LegacyLoginListener implements Listener {
                     Addresses.normalize(e.getAddress()), others);
             outcome = core.verify(identity, tokens);
             if (!tokens.isEmpty()) {
-                boolean removed = strip(propertyMap);
+                boolean removed = strip(player, profile);
                 if (core.debug()) logger.info("Used credential " + (removed ? "removed from" : "left in (read-only)")
                         + " the profile of " + SecurityLog.clean(player.getName()));
             }
@@ -97,16 +98,36 @@ final class LegacyLoginListener implements Listener {
         }
     }
 
-    /**
-     * Removes the used credential so it is not sent to other players' tab lists. Newer authlib
-     * versions make the map read-only; the credential is single-use, so leaving it is harmless.
-     */
-    private static boolean strip(Object propertyMap) {
+    /** Debug self-check: the joined player's live profile must not carry the credential. */
+    @EventHandler(priority = EventPriority.MONITOR)
+    public void checkStripped(org.bukkit.event.player.PlayerJoinEvent e) {
+        if (!core.debug()) return;
         try {
-            propertyMap.getClass().getMethod("removeAll", Object.class).invoke(propertyMap, ForwardingToken.PROPERTY);
-            return true;
-        } catch (ReflectiveOperationException | RuntimeException e) {
-            return false; // read-only profile on this version
+            boolean present = ProfileScrubber.hasCredential(e.getPlayer().getClass().getMethod("getProfile").invoke(e.getPlayer()));
+            String name = SecurityLog.clean(e.getPlayer().getName());
+            if (present) logger.severe("Connection credential still present on " + name + "'s profile; please report this with your server version");
+            else logger.info("Credential absent at join for " + name);
+        } catch (ReflectiveOperationException | RuntimeException | LinkageError ignored) {
+            // diagnostic only
+        }
+    }
+
+    /**
+     * Removes the used credential so it is not sent to other players' tab lists. On authlib 7
+     * (Spigot 1.21.9+) the profile is read-only, so a copy without it replaces the original on the
+     * player entity. Returns whether the live profile is clean afterwards (checked by reading it back).
+     */
+    private static boolean strip(Player player, Object profile) {
+        try {
+            Object clean = ProfileScrubber.withoutCredential(profile);
+            if (clean == null) return false;
+            if (clean != profile) {
+                ProfileScrubber.replaceReferences(player.getClass().getMethod("getHandle").invoke(player), profile, clean);
+                ProfileScrubber.replaceReferences(player, profile, clean); // in case CraftPlayer keeps its own reference
+            }
+            return !ProfileScrubber.hasCredential(player.getClass().getMethod("getProfile").invoke(player));
+        } catch (ReflectiveOperationException | RuntimeException | LinkageError e) {
+            return false; // the credential is single-use, so leaving it is harmless
         }
     }
 

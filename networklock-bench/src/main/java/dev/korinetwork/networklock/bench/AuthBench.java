@@ -92,7 +92,9 @@ public class AuthBench {
         forged = ForwardingToken.mint("proxy-1", Keys.decode(Keys.generate()), "lobby", id, System.currentTimeMillis());
 
         // BungeeGuard 1.4.0, loaded from its release jar on the classpath
-        String bgToken = "Xq3TzS0dZ9bL7mWpR2vN8kYcHf4uAeJ1oGtKiE6sQwD5xVnB0lMrUyCjP3hOgI9a"; // 64 chars like its generator
+        byte[] bgBytes = new byte[32];
+        new java.security.SecureRandom().nextBytes(bgBytes);
+        String bgToken = java.util.HexFormat.of().formatHex(bgBytes); // 64 characters, like BungeeGuard's own generator
         Class<?> backendIface = Class.forName("me.lucko.bungeeguard.backend.BungeeGuardBackend");
         Object backend = Proxy.newProxyInstance(backendIface.getClassLoader(), new Class<?>[]{backendIface}, (p, m, a) -> {
             switch (m.getName()) {

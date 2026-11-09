@@ -116,6 +116,8 @@ public final class ConnectionLimiter {
     private final double refillPerMilli;
     private final ConcurrentHashMap<Key, Bucket> buckets = new ConcurrentHashMap<>();
     private final AtomicInteger sinceSweep = new AtomicInteger();
+    private final AtomicLong lastSweep = new AtomicLong(Long.MIN_VALUE / 2);
+    private final AtomicInteger sweeps = new AtomicInteger();
     private final AtomicLong floodSecond = new AtomicLong();
     private final AtomicInteger floodCount = new AtomicInteger();
     private volatile boolean saturated;
@@ -133,7 +135,8 @@ public final class ConnectionLimiter {
         Key key = key(address);
         Bucket b = buckets.get(key);
         if (b == null) {
-            if ((sinceSweep.incrementAndGet() & 255) == 0 || buckets.size() >= s.maxTracked()) sweep(now);
+            // at most one sweep per second: under a wide flood a full table must not cost a full scan per new address
+            if (((sinceSweep.incrementAndGet() & 255) == 0 || buckets.size() >= s.maxTracked()) && claimSweep(now)) sweep(now);
             if (buckets.size() >= s.maxTracked()) {
                 // shortcut: untracked addresses pass when the table is full, which keeps memory bounded
                 // at the cost of throttling during a very wide flood; upgrade to an LRU if that matters.
@@ -173,7 +176,18 @@ public final class ConnectionLimiter {
         return floodCount.incrementAndGet() == s.floodThreshold();
     }
 
+    private boolean claimSweep(long now) {
+        long last = lastSweep.get();
+        return now - last >= 1000 && lastSweep.compareAndSet(last, now);
+    }
+
+    /** Number of sweeps so far (tests). */
+    int sweeps() {
+        return sweeps.get();
+    }
+
     void sweep(long now) {
+        sweeps.incrementAndGet();
         long idle = s.windowSeconds() * 1000L; // a bucket idle for a full window has refilled; blocks are kept separately
         buckets.values().removeIf(b -> {
             synchronized (b) {

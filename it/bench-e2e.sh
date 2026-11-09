@@ -22,6 +22,7 @@ VEL_JAR="$ROOT/it/work/jars/velocity-3.5.1-615.jar"
 BG_JAR=${BG_JAR:-$(pwd)/it/work/BungeeGuard.jar} # BungeeGuard 1.4.0 release jar
 NL100_JAR="$ROOT/it/work/baseline/NetworkLock.jar"
 NL101_JAR="$ROOT/build/libs/NetworkLock.jar"
+NL101X_JAR=${NL101X_JAR:-}   # optional experiment build, config name "nl101x"
 SEP=":"; native() { echo "$1"; }
 case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) SEP=";"; native() { cygpath -w "$1"; };; esac
 CP="$(native "$ROOT/it/work/loadcls")$SEP$(native "$ROOT/networklock-core/build/classes/java/main")"
@@ -62,6 +63,8 @@ setup() { # config dir
     # synthetic players have no skin data; with bungee-cord online-mode on, Paper would ask Mojang's session
     # server for every login (complete(true)) and the benchmark would measure Mojang, not the plugins
     sed -i '/^  bungee-cord:/{n;s/online-mode: true/online-mode: false/}' "$d/paper/config/paper-global.yml"
+    # JOINS=n: Paper admits at most max-joins-per-tick (default 5 = 100 joins/s) new players per tick
+    [ -n "${JOINS:-}" ] && sed -i "s/max-joins-per-tick: .*/max-joins-per-tick: $JOINS/" "$d/paper/config/paper-global.yml"
     grep -A1 "^  bungee-cord:" "$d/paper/config/paper-global.yml" | grep -q "online-mode: false" || { echo "could not turn off bungee-cord online-mode"; exit 2; }
     local mode=legacy
     case $cfg in
@@ -72,8 +75,8 @@ setup() { # config dir
             mkdir -p "$d/paper/plugins/BungeeGuard"
             printf 'allowed-tokens:\n  - "%s"\nno-data-kick-message: "&cUnable to authenticate - no data was forwarded by the proxy."\ninvalid-token-kick-message: "&cUnable to authenticate."\n' "$BGTOKEN" > "$d/paper/plugins/BungeeGuard/config.yml"
             ;;
-        nl100|nl101)
-            local jar=$NL100_JAR; [ $cfg = nl101 ] && jar=$NL101_JAR
+        nl100|nl101|nl101x)
+            local jar=$NL100_JAR; [ $cfg = nl101 ] && jar=$NL101_JAR; [ $cfg = nl101x ] && jar=$NL101X_JAR
             cp "$jar" "$d/paper/plugins/NetworkLock.jar"
             cp "$jar" "$d/velocity/plugins/NetworkLock.jar"
             mkdir -p "$d/paper/plugins/NetworkLock" "$d/velocity/plugins/networklock"
@@ -102,8 +105,21 @@ run_load() { # cfg rep workload mode count rate [names]
     local cfg=$1 rep=$2 wl=$3 mode=$4 count=$5 rate=$6 names=${7:-$5}
     local c1p c1v g1p g1v c2p c2v g2p g2v line
     c1p=$(cpu_ms "$PP"); c1v=$(cpu_ms "$VP"); g1p=($(gc_stat "$PP")); g1v=($(gc_stat "$VP"))
+    local before smp=""
+    before=$(wc -l < "$d/paper/console.log")
+    if [ "${MSPT:-0}" = 1 ]; then   # MSPT=1: sample Paper's tick times every 5 s during the workload
+        ( while :; do sleep 5; echo mspt >> "$d/paper/cmd.txt"; done ) & smp=$!
+    fi
     line=$(java -Dproto=$PROTO -cp "$CP" Load 127.0.0.1 35690 "$mode" "$count" "$rate" "r${rep}${wl:0:3}" "$(native "$W/raw/$cfg-r$rep-$wl.csv")" "$names")
     c2p=$(cpu_ms "$PP"); c2v=$(cpu_ms "$VP"); g2p=($(gc_stat "$PP")); g2v=($(gc_stat "$VP"))
+    if [ -n "$smp" ]; then
+        kill "$smp" 2>/dev/null; sleep 1
+        # first avg/min/max triple of each mspt report = the last 5 s; mean of the averages and the worst max
+        # Paper colours the numbers and prints decimal commas on some locales: strip both first
+        tail -n +"$((before + 1))" "$d/paper/console.log" | sed 's/\x1b\[[0-9;]*m//g' \
+            | grep -oE '[0-9]+[.,][0-9]+/[0-9]+[.,][0-9]+/[0-9]+[.,][0-9]+' | tr ',' '.' | awk -F/ -v k="$cfg,$rep,$wl" \
+            'NR % 3 == 1 { s += $1; n++; if ($3 > m) m = $3 } END { if (n) printf "%s,%.2f,%.2f,%d\n", k, s / n, m, n }' >> "$W/mspt.csv"
+    fi
     local v; v() { echo "$line" | grep -o "$1=[^ ]*" | cut -d= -f2; }
     echo "$cfg,$rep,$wl,$(v accepted),$(v rejected),$(v timeout),$(v error),$(v wall_s),$(v throughput),$(v peak_inflight),$(v mean_ms),$(v p50_ms),$(v p95_ms),$(v p99_ms),$(v max_ms),$((c2p-c1p)),$((c2v-c1v)),$((g2p[1]-g1p[1])),$((g2p[2]-g1p[2])),$((g2p[0]/1024)),$((g2v[1]-g1v[1])),$((g2v[2]-g1v[2]))" >> "$RESULTS"
     echo "  $cfg r$rep $wl: $line"
@@ -125,10 +141,11 @@ for rep in $(seq "${START_REP:-1}" "$REPS"); do
         java -Dproto=$PROTO -cp "$CP" Load 127.0.0.1 35690 rate 300 30 warm "$(native "$W/raw/warmup.csv")" > /dev/null
         sleep 3
         for r in ${RATES-1 5 10 25 50 100 250 500}; do
-            n=$((r * 10)); [ $n -lt 10 ] && n=10
+            n=$((r * ${DUR:-10})); [ $n -lt 10 ] && n=10   # DUR: seconds per rate
             run_load "$cfg" "$rep" "rate$r" rate "$n" "$r"
         done
         for b in ${BURSTS-50 100 200 500}; do run_load "$cfg" "$rep" "burst$b" burst "$b" 0; done
+        if [ "${EXTRA:-1}" = 1 ]; then   # EXTRA=0: rates and bursts only
         run_load "$cfg" "$rep" "reconnect" rate 500 50 10
         # mixed: forged direct connections to Paper while real players join through the proxy
         java -Dproto=$PROTO -cp "$CP" Load 127.0.0.1 35680 forged 500 50 atk "$(native "$W/raw/$cfg-r$rep-attack.csv")" > "$W/attack-$cfg-r$rep.txt" &
@@ -137,6 +154,7 @@ for rep in $(seq "${START_REP:-1}" "$REPS"); do
         wait $ATK
         echo "  attack: $(cat "$W/attack-$cfg-r$rep.txt")"
         [ "$rep" = 1 ] && run_load "$cfg" "$rep" "sustained" rate 6000 50
+        fi
         grep -ciE "exception|error" "$d/paper/console.log" | xargs -I{} echo "  paper log exception/error lines: {}"
         stop_all "$d"
     done

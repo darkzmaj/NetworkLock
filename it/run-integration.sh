@@ -162,6 +162,24 @@ logged "backend verified Velocity join"  "$B/console.log" "Accepted ViaVelocity"
 check "join via Waterfall (env key)"     "ACCEPTED"  "$(probe 127.0.0.1 35601 ViaWaterfall plain)"
 logged "backend verified Waterfall join" "$B/console.log" "Accepted ViaWaterfall"
 
+echo "== no credential for a connect that will not happen (NL-10)"
+java -Djoin=true -Djoinms=15000 -Dproto="$PROTO" -cp "$CP" Probe 127.0.0.1 35601 Stayer plain > "$WORK/stayer.txt" 2>&1 &
+STAYER=$!
+sleep 6
+send "$W" "nlock stats"; sleep 2
+S1=$(grep -o "signed connections: [0-9]*" "$W/console.log" | tail -1)
+send "$W" "send Stayer lobby"; sleep 3   # Stayer is already on lobby: BungeeCord fires ServerConnectEvent, then connects nowhere
+send "$W" "nlock stats"; sleep 2
+S2=$(grep -o "signed connections: [0-9]*" "$W/console.log" | tail -1)
+wait "$STAYER"
+if grep -qi "unknown command\|command not found" <(tail -30 "$W/console.log"); then
+    echo "SKIP  Waterfall can no longer download its send module; NL-10 is covered by it/bungee-check.sh on BungeeCord"
+elif [ -n "$S1" ] && [ "$S1" = "$S2" ]; then
+    echo "PASS  connect to the server the player is on was not signed ($S2)"
+else
+    echo "FAIL  connect to the current server was signed ($S1 -> $S2)"; FAILED=1
+fi
+
 echo "== proxy translates backend rejections"
 sed -i 's/server-id: "lobby"/server-id: "renamed"/' "$B/plugins/NetworkLock/config.yml"; send "$B" "nlock reload"; sleep 3
 R=$(probe 127.0.0.1 35600 Mismatch plain)

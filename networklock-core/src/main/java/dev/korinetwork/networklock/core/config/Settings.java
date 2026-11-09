@@ -265,6 +265,10 @@ public final class Settings {
             String serverId = t.string("network.server-id", "");
             if (serverId.trim().isEmpty()) {
                 t.error("network.server-id", "must be set to this server's name in the proxy configuration");
+            } else if (!serverId.equals(serverId.trim())) {
+                t.error("network.server-id", "has spaces at the start or end; it must match the proxy's server name exactly");
+            } else if (!ForwardingToken.isValidTarget(serverId)) {
+                t.error("network.server-id", "must be 1 to 64 characters without control characters");
             }
             Map<String, TrustedProxy> proxies = new LinkedHashMap<>();
             List<String> warnings = new ArrayList<>();
@@ -294,10 +298,13 @@ public final class Settings {
                 if (single != null) rawKeys.add(single);
                 if (rawKeys.isEmpty()) e.error("keys", "must contain at least one key");
                 List<byte[]> keys = new ArrayList<>();
+                Set<String> own = new HashSet<>();
                 for (Object k : rawKeys) {
                     try {
                         byte[] key = Secrets.resolveKey(String.valueOf(k), env);
-                        if (!fingerprints.add(Keys.fingerprint(key))) {
+                        String fp = Keys.fingerprint(key);
+                        if (!own.add(fp)) continue; // the same key listed twice for one proxy: harmless, keep it once
+                        if (!fingerprints.add(fp)) {
                             warnings.add("Proxy '" + id + "' shares a key with another entry: a leak of one compromises both."
                                     + " Give every proxy its own key.");
                         }

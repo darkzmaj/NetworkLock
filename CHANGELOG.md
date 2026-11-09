@@ -16,9 +16,24 @@ Everything from 1.0.1-dev below, plus:
 - Player names are cleaned before they are logged, so a crafted name can't forge console lines (NL-02).
 - Refusing a login can no longer fail open if building the kick message goes wrong (NL-04).
 - A replayed signature is reported as a replay even when the replay memory is full (NL-05).
+- The used signature is now removed from the player's live profile on Sponge and Spigot 1.21.9+ too (NL-07).
+- BungeeCord/Waterfall: a connect that never happens (already on that server, already connecting, cancelled, server down) no longer leaves an unused signature on the player's proxy profile (NL-10).
+- A login flood from many addresses can no longer make the proxy scan its whole address table for every new connection (NL-11).
+- Changing `replay-cache-max-entries` with a reload no longer forgets used signatures (NL-12).
+- The update check stays off while no config is loaded, and the anonymous statistics ID can no longer be worked out from the key fingerprint shown in logs (NL-13, NL-14).
+- Sponge also checks logins that another plugin cancelled before NetworkLock, in case a later plugin lets them back in (NL-15).
+
+### Fixes
+- No more false "disabled while the server is running" error on every Spigot shutdown.
+- `server-id` values with spaces at the ends or more than 64 characters are config errors now, instead of refusing every login.
+- A proxy server name that can't be signed is reported clearly, once, instead of looking like "the player did not come through a proxy".
+- Listing the same key twice for one proxy no longer warns about a shared key.
+- Plugin reloads by plugin managers no longer keep the old plugin's classes in memory.
+- `/networklock stats` on game servers shows how full the replay memory is.
+- Console texts no longer depend on the server's language settings.
 
 ### Performance
-- Each thread reuses its crypto objects instead of setting them up for every login: signatures are created 17% faster and forged ones rejected 25% faster. Same signatures as before; see docs/BENCHMARK-REPORT.md.
+- Each thread reuses its crypto objects instead of setting them up for every login: signatures are created about 16% faster and forged ones rejected about 24% faster. Same signatures as before; see docs/BENCHMARK-REPORT.md.
 
 ## 1.0.1-dev (experimental, GitHub pre-release only)
 

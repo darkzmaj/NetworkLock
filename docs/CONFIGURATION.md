@@ -47,7 +47,7 @@ Extra settings, not in the default file:
 
 | Setting | Default | What it does |
 |---|---|---|
-| `network.server-id` | empty, must be set | This server's name in your proxy config, for example `lobby`. |
+| `network.server-id` | empty, must be set | This server's name in your proxy config, for example `lobby`. Exactly as written there: no spaces at the ends, at most 64 characters. |
 | `authentication.trusted-proxies` | empty, must be set | The proxies allowed to send players here, each with `id` and `keys`. A key can also be `env:VARIABLE` or `file:/path`. |
 | `messages.authentication-failed` | not set | Optional text refused players see, instead of the default. See below. |
 | `messages.authentication-timeout` | not set | Same, for an expired signature. |
@@ -127,7 +127,7 @@ Denied login name=Steve ... reason=WRONG_TARGET: signed for server 'smp', but th
 
 With `metrics.enabled: true` (the default), each proxy and game server sends one small message a day over HTTPS, so we can show how many servers NetworkLock protects. It contains:
 
-- an anonymous ID: a one-way hash, so the same server is only counted once, and it can't be turned back into anything
+- an anonymous ID: a one-way hash of the server's secret keys, so the same server is only counted once; it can't be turned back into anything, and it can't be worked out from the key fingerprints shown in logs
 - the NetworkLock version
 - the platform (for example `velocity` or `paper`) and whether it is a proxy or a game server
 

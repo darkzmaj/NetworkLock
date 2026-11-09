@@ -140,51 +140,49 @@ public final class ForwardingToken {
     /**
      * Per-thread crypto objects. Looking up a Mac/MessageDigest provider and scheduling the key
      * dominated the cost of a login; reusing them changes nothing about the bytes being MACed.
+     * Held only in JDK types, so pooled threads that outlive the plugin (reloads by plugin managers)
+     * do not keep NetworkLock's classloader alive. Slots: Mac, MessageDigest, 16-byte scratch,
+     * the key array the Mac is initialised with (compared by identity).
      */
-    private static final class Crypto {
-        final Mac mac;
-        final MessageDigest sha;
-        final byte[] scratch = new byte[16];
-        byte[] macKey; // the key array the Mac is initialised with (compared by identity)
+    private static final int MAC = 0, SHA = 1, SCRATCH = 2, KEY = 3;
 
-        Crypto() {
+    private static final ThreadLocal<Object[]> CRYPTO = new ThreadLocal<Object[]>() {
+        @Override
+        protected Object[] initialValue() {
             try {
-                mac = Mac.getInstance("HmacSHA256");
-                sha = MessageDigest.getInstance("SHA-256");
+                return new Object[]{Mac.getInstance("HmacSHA256"), MessageDigest.getInstance("SHA-256"), new byte[16], null};
             } catch (GeneralSecurityException e) {
                 throw new IllegalStateException("HmacSHA256/SHA-256 unavailable", e);
             }
         }
-    }
-
-    private static final ThreadLocal<Crypto> CRYPTO = new ThreadLocal<Crypto>() {
-        @Override
-        protected Crypto initialValue() {
-            return new Crypto();
-        }
     };
 
+    private static final Comparator<PlayerIdentity.Property> PROPERTY_ORDER = Comparator.comparing(PlayerIdentity.Property::name)
+            .thenComparing(PlayerIdentity.Property::value)
+            .thenComparing(PlayerIdentity.Property::signature);
+
     static byte[] mac(byte[] key, byte[] header, PlayerIdentity id) {
-        Crypto c = CRYPTO.get();
+        Object[] c = CRYPTO.get();
+        Mac hmac = (Mac) c[MAC]; // doFinal() below leaves it reset and keyed for the next call
+        byte[] scratch = (byte[]) c[SCRATCH];
         try {
-            if (c.macKey != key) {
-                c.mac.init(new SecretKeySpec(key, "HmacSHA256"));
-                c.macKey = key;
+            if (c[KEY] != key) {
+                hmac.init(new SecretKeySpec(key, "HmacSHA256"));
+                c[KEY] = key;
             }
-            Mac hmac = c.mac; // doFinal() below leaves it reset and keyed for the next call
             hmac.update(DOMAIN);
             hmac.update(header);
-            ByteBuffer.wrap(c.scratch).putLong(id.uuid().getMostSignificantBits()).putLong(id.uuid().getLeastSignificantBits());
-            hmac.update(c.scratch, 0, 16);
-            updateLengthPrefixed(hmac, null, c.scratch, id.name());
-            updateLengthPrefixed(hmac, null, c.scratch, id.address());
+            ByteBuffer.wrap(scratch).putLong(id.uuid().getMostSignificantBits()).putLong(id.uuid().getLeastSignificantBits());
+            hmac.update(scratch, 0, 16);
+            updateLengthPrefixed(hmac, null, scratch, id.name());
+            updateLengthPrefixed(hmac, null, scratch, id.address());
             hmac.update(propertiesDigest(c, id.properties()));
             return hmac.doFinal();
         } catch (GeneralSecurityException e) {
             throw new IllegalStateException("HmacSHA256 unavailable", e);
         } catch (RuntimeException e) {
-            c.macKey = null; // a half-fed Mac must not be reused as if it were fresh
-            c.mac.reset();
+            c[KEY] = null; // a half-fed Mac must not be reused as if it were fresh
+            hmac.reset();
             throw e;
         }
     }
@@ -194,22 +192,19 @@ public final class ForwardingToken {
         return propertiesDigest(CRYPTO.get(), properties);
     }
 
-    private static byte[] propertiesDigest(Crypto c, List<PlayerIdentity.Property> properties) {
+    private static byte[] propertiesDigest(Object[] c, List<PlayerIdentity.Property> properties) {
         List<PlayerIdentity.Property> sorted = new ArrayList<>(properties.size());
         for (PlayerIdentity.Property p : properties) {
             if (!PROPERTY.equals(p.name())) sorted.add(p);
         }
-        if (sorted.size() > 1) {
-            sorted.sort(Comparator.comparing(PlayerIdentity.Property::name)
-                    .thenComparing(PlayerIdentity.Property::value)
-                    .thenComparing(PlayerIdentity.Property::signature));
-        }
-        MessageDigest sha = c.sha;
+        if (sorted.size() > 1) sorted.sort(PROPERTY_ORDER);
+        MessageDigest sha = (MessageDigest) c[SHA];
+        byte[] scratch = (byte[]) c[SCRATCH];
         sha.reset();
         for (PlayerIdentity.Property p : sorted) {
-            updateLengthPrefixed(null, sha, c.scratch, p.name());
-            updateLengthPrefixed(null, sha, c.scratch, p.value());
-            updateLengthPrefixed(null, sha, c.scratch, p.signature());
+            updateLengthPrefixed(null, sha, scratch, p.name());
+            updateLengthPrefixed(null, sha, scratch, p.value());
+            updateLengthPrefixed(null, sha, scratch, p.signature());
         }
         return sha.digest();
     }
@@ -243,11 +238,15 @@ public final class ForwardingToken {
         return id.getBytes(StandardCharsets.US_ASCII);
     }
 
+    /** Whether a server name can be signed: 1 to 64 UTF-8 bytes, no control characters. */
+    public static boolean isValidTarget(String target) {
+        if (target == null) return false;
+        int n = target.getBytes(StandardCharsets.UTF_8).length;
+        return n > 0 && n <= 64 && target.chars().noneMatch(Character::isISOControl);
+    }
+
     private static byte[] checkedTarget(String target) {
-        byte[] b = target == null ? new byte[0] : target.getBytes(StandardCharsets.UTF_8);
-        if (b.length == 0 || b.length > 64 || target.chars().anyMatch(Character::isISOControl)) {
-            throw new IllegalArgumentException("invalid target server name");
-        }
-        return b;
+        if (!isValidTarget(target)) throw new IllegalArgumentException("invalid target server name");
+        return target.getBytes(StandardCharsets.UTF_8);
     }
 }

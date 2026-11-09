@@ -36,7 +36,7 @@ public final class NonceCache {
 
     private final ConcurrentHashMap<Key, Long> seen = new ConcurrentHashMap<>();
     private final AtomicInteger inserts = new AtomicInteger();
-    private final int maxEntries;
+    private volatile int maxEntries;
 
     public NonceCache(int maxEntries) {
         this.maxEntries = maxEntries;
@@ -65,6 +65,11 @@ public final class NonceCache {
 
     public int size() {
         return seen.size();
+    }
+
+    /** Changes the capacity in place, so a reload never forgets which tokens were used. */
+    public void capacity(int maxEntries) {
+        this.maxEntries = maxEntries;
     }
 
     public int capacity() {

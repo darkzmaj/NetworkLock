@@ -5,6 +5,7 @@ import java.net.HttpURLConnection;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.util.List;
 import java.security.NoSuchAlgorithmException;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -93,11 +94,20 @@ public final class UsageStats {
         return s.replaceAll("[^A-Za-z0-9._+-]", "");
     }
 
-    /** A stable anonymous ID: the first 16 bytes of SHA-256 over a fixed label and the given parts. */
-    public static String anonymousId(String... parts) {
+    /**
+     * A stable anonymous ID: the first 16 bytes of SHA-256 over a fixed label, the secret key bytes and the
+     * given parts. The keys never leave the server, so the ID cannot be worked out from anything public
+     * (for example the key fingerprints shown in logs and commands).
+     */
+    public static String anonymousId(List<byte[]> secrets, String... parts) {
         try {
             MessageDigest sha = MessageDigest.getInstance("SHA-256");
-            sha.update("NetworkLock/usage-id/v1".getBytes(StandardCharsets.US_ASCII));
+            sha.update("NetworkLock/usage-id/v2".getBytes(StandardCharsets.US_ASCII));
+            for (byte[] k : secrets) {
+                sha.update((byte) 1);
+                sha.update(java.nio.ByteBuffer.allocate(4).putInt(k.length).array());
+                sha.update(k);
+            }
             for (String p : parts) {
                 sha.update((byte) 0);
                 sha.update(p.getBytes(StandardCharsets.UTF_8));

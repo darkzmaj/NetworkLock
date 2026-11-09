@@ -1,6 +1,6 @@
 # Compatibility report: NetworkLock 1.0.1
 
-One file, `NetworkLock.jar`, was tested on every server below. Nothing was rebuilt per version: a second jar was never needed. Tested 2026-11-08 on Windows 11 (i7-14700KF) with Corretto 8, Temurin 17, Temurin 21 and Temurin 25. Server jars came from the official download sites and were checksum-checked where a checksum is published (Paper, Folia, Velocity and Waterfall SHA-256; Purpur MD5; Gale GitHub release digest). Spigot and CraftBukkit were built with BuildTools.
+One file, `NetworkLock.jar`, was tested on every server below. Nothing was rebuilt per version: a second jar was never needed. Final run 2026-11-09 on the release jar (SHA-256 `dac1de11…`), Windows 11 (i7-14700KF) with Corretto 8, Temurin 17, Microsoft OpenJDK 21 and Temurin 25. Server jars came from the official download sites and were checksum-checked where a checksum is published (Paper, Folia, Velocity and Waterfall SHA-256; Purpur MD5; Gale GitHub release digest). Spigot and CraftBukkit were built with BuildTools.
 
 ## How one jar runs on 1.8 through 26.3
 
@@ -24,35 +24,35 @@ Both hooks run before the player is placed in the world, and neither needs Proto
 
 ## Game servers (`it/matrix.sh`)
 
-Checks per server: forged UUID without signature, junk signature, signature for another server, valid signature accepted, the same signature replayed and refused, used signature removed from the profile, `doctor` output, and no NetworkLock errors in the console.
+Checks per server: forged UUID without signature, junk signature, signature for another server, valid signature accepted, the same signature replayed and refused, used signature removed from the profile (read back from the server), a full join with a fresh signature after which the joined player's live profile must not carry it, a key added by reload accepted and the removed old key refused right after the confirmed reload, `doctor` output, and no NetworkLock errors in the console.
 
 | Server | Minecraft (protocol) | Java | Hook | Result |
 |---|---|---|---|---|
-| Paper 445 | 1.8.8 (47) | 8 | PlayerLoginEvent | ✅ 7/7 |
-| Spigot (BuildTools) | 1.8.8 (47) | 8 | PlayerLoginEvent | ✅ 7/7 |
-| PandaSpigot 226 | 1.8.8 (47) | 8 | PlayerLoginEvent | ✅ 7/7 |
-| Paper 1620 | 1.12.2 (340) | 8 | Paper API | ✅ 7/7 |
-| Paper 794 | 1.16.5 (754) | 8 | Paper API | ✅ 7/7 |
-| Purpur 1171 | 1.16.5 (754) | 8 | Paper API | ✅ 7/7 |
-| Paper 411 | 1.17.1 (756) | 17 | Paper API | ✅ 7/7 |
-| Paper 388 | 1.18.2 (758) | 17 | Paper API | ✅ 7/7 |
-| Paper 550 | 1.19.4 (762) | 17 | Paper API | ✅ 7/7 |
-| Kaiiju 240 (Folia fork) | 1.20.1 (763) | 17 | Paper API | ✅ 7/7 |
-| Paper 499 | 1.20.4 (765) | 17 | Paper API | ✅ 7/7 |
-| Paper 151 | 1.20.6 (766) | 21 | Paper API | ✅ 7/7 |
-| Paper 132 | 1.21.11 (774) | 21 | Paper API | ✅ 7/7 |
-| Folia 14 | 1.21.11 (774) | 21 | Paper API | ✅ 7/7 |
-| Purpur 2568 | 1.21.11 (774) | 21 | Paper API | ✅ 7/7 |
-| Pufferfish 39 | 1.21.10 (773) | 21 | Paper API | ✅ 7/7 |
-| Spigot (BuildTools) | 1.21.11 (774) | 21 | PlayerLoginEvent | ✅ 6/6 ⚠️ used signature stays in the read-only profile (harmless) |
+| Paper 445 | 1.8.8 (47) | 8 | PlayerLoginEvent | ✅ 10/10 |
+| Spigot (BuildTools) | 1.8.8 (47) | 8 | PlayerLoginEvent | ✅ 10/10 |
+| PandaSpigot 226 | 1.8.8 (47) | 8 | PlayerLoginEvent | ✅ 10/10 |
+| Paper 1620 | 1.12.2 (340) | 8 | Paper API | ✅ 10/10 |
+| Paper 794 | 1.16.5 (754) | 8 | Paper API | ✅ 10/10 |
+| Purpur 1171 | 1.16.5 (754) | 8 | Paper API | ✅ 10/10 |
+| Paper 411 | 1.17.1 (756) | 17 | Paper API | ✅ 10/10 |
+| Paper 388 | 1.18.2 (758) | 17 | Paper API | ✅ 10/10 |
+| Paper 550 | 1.19.4 (762) | 17 | Paper API | ✅ 10/10 |
+| Kaiiju 240 (Folia fork) | 1.20.1 (763) | 17 | Paper API | ✅ 10/10 |
+| Paper 499 | 1.20.4 (765) | 17 | Paper API | ✅ 10/10 |
+| Paper 151 | 1.20.6 (766) | 21 | Paper API | ✅ 10/10 |
+| Paper 132 | 1.21.11 (774) | 21 | Paper API | ✅ 10/10 |
+| Folia 14 | 1.21.11 (774) | 21 | Paper API | ✅ 10/10 |
+| Purpur 2568 | 1.21.11 (774) | 21 | Paper API | ✅ 10/10 |
+| Pufferfish 39 | 1.21.10 (773) | 21 | Paper API | ✅ 10/10 |
+| Spigot (BuildTools) | 1.21.11 (774) | 21 | PlayerLoginEvent | ✅ 10/10 (read-only authlib 7 profile: signature removed by swapping in a clean copy) |
 | CraftBukkit (BuildTools) | 1.21.11 (774) | 21 | none | ✅ 5/5, every login refused as expected |
-| SpongeVanilla RC2761 | 1.21.11 (774) | 21 | Sponge auth event | ✅ 6/6 ⚠️ profile read-only (harmless) |
-| Gale R2.3.0 | 26.2 (776) | 25 | Paper API | ✅ 7/7 |
-| Paper 236 | 26.3 (777) | 25 | Paper API | ✅ 7/7 |
-| Leaf 22 | 26.3 (777) | 25 | Paper API | ✅ 7/7 |
-| SpongeVanilla RC2764 | 26.3 (777) | 25 | Sponge auth event | ✅ 6/6 ⚠️ profile read-only (harmless) |
+| SpongeVanilla RC2761 | 1.21.11 (774) | 21 | Sponge auth event | ✅ 10/10 (read-only profile: signature removed by swapping in a clean copy) |
+| Gale R2.3.0 | 26.2 (776) | 25 | Paper API | ✅ 10/10 |
+| Paper 236 | 26.3 (777) | 25 | Paper API | ✅ 10/10 |
+| Leaf 22 | 26.3 (777) | 25 | Paper API | ✅ 10/10 |
+| SpongeVanilla RC2764 | 26.3 (777) | 25 | Sponge auth event | ✅ 10/10 (read-only profile: signature removed by swapping in a clean copy) |
 
-23 servers, 23 passed. "Harmless" means the used signature can be seen in that player's profile but cannot be used again: it is tied to that player and server, already marked as used, and expires within 30 seconds.
+23 servers, 23 passed. On every one of them a really joined player's live profile was checked and carried no signature, including the read-only profiles of Sponge and Spigot 1.21.9+.
 
 ## Proxies and full networks (`it/run-integration.sh`)
 
@@ -62,7 +62,8 @@ Checks per server: forged UUID without signature, junk signature, signature for 
 | Folia 1.21.11 + Velocity 3.5.1 (`bungeeguard`) + Waterfall 1.21 | ✅ 15/15 |
 | Velocity 3.5.1, `modern` forwarding, Paper 1.21.11 | ✅ by hand on 1.0.0, not re-run for 1.0.1 |
 | Velocity 4.3.1 + Paper 26.3, Java 25 | ✅ by hand on 1.0.0, not re-run for 1.0.1 |
-| BungeeCord (latest build) | ✅ by hand on 1.0.0, not re-run for 1.0.1 |
+| BungeeCord (latest build) + Paper 1.21.11 (`it/bungee-check.sh`) | ✅ 4/4: join, no signature for a connect to the current server, unused signature removed after a failed connect (NL-10) |
+| Velocity 3.5.1 + Waterfall 1.21 in front of Paper 1.21.11 and Folia 1.21.11, both proxies trusted by both backends (`it/soak.sh`) | ✅ 3-hour soak, see TEST-REPORT |
 
 The 15 checks: five direct attacks, a valid signature accepted once and its replay refused, joins through Velocity and Waterfall verified by the backend, a refused player seeing the proxy's own `&c` message, and a broken reload being refused while protection keeps working.
 

@@ -7,6 +7,7 @@ import dev.korinetwork.networklock.core.BackendCore;
 import dev.korinetwork.networklock.core.ForwardingToken;
 import dev.korinetwork.networklock.core.Outcome;
 import dev.korinetwork.networklock.core.PlayerIdentity;
+import dev.korinetwork.networklock.core.ProfileScrubber;
 import dev.korinetwork.networklock.core.SecurityLog;
 import dev.korinetwork.networklock.core.MiniText;
 import org.bukkit.event.EventHandler;
@@ -60,6 +61,11 @@ final class PaperLoginListener implements Listener {
                 // The credential must never reach the player's live profile (tab list, skins, other clients).
                 profile.removeProperty(ForwardingToken.PROPERTY);
                 e.setPlayerProfile(profile);
+                if (core.debug()) {
+                    boolean left = false;
+                    for (ProfileProperty p : e.getPlayerProfile().getProperties()) left |= ForwardingToken.PROPERTY.equals(p.getName());
+                    logger.info("Used credential " + (left ? "left in (read-only)" : "removed from") + " the profile of " + SecurityLog.clean(e.getName()));
+                }
             }
         } catch (Throwable t) {
             logger.severe("Error verifying login of " + SecurityLog.clean(e.getName()) + " (denied): " + t);
@@ -86,13 +92,23 @@ final class PaperLoginListener implements Listener {
         try {
             for (ProfileProperty p : e.getPlayer().getPlayerProfile().getProperties()) {
                 if (ForwardingToken.PROPERTY.equals(p.getName())) {
-                    logger.severe("Connection credential still present on " + e.getPlayer().getName()
+                    logger.severe("Connection credential still present on " + SecurityLog.clean(e.getPlayer().getName())
                             + "'s profile; please report this with your server version");
                     return;
                 }
             }
-        } catch (LinkageError ignored) {
-            // Player#getPlayerProfile is missing on some old Paper builds; the check is only a diagnostic
+            if (core.debug()) logger.info("Credential absent at join for " + SecurityLog.clean(e.getPlayer().getName()));
+        } catch (LinkageError oldPaper) {
+            // Player#getPlayerProfile is missing on some old Paper builds: read the server's own GameProfile instead
+            if (!core.debug()) return;
+            try {
+                boolean present = ProfileScrubber.hasCredential(e.getPlayer().getClass().getMethod("getProfile").invoke(e.getPlayer()));
+                String name = SecurityLog.clean(e.getPlayer().getName());
+                if (present) logger.severe("Connection credential still present on " + name + "'s profile; please report this with your server version");
+                else logger.info("Credential absent at join for " + name);
+            } catch (ReflectiveOperationException | RuntimeException | LinkageError ignored) {
+                // diagnostic only
+            }
         }
     }
 

@@ -2,7 +2,7 @@
 
 Measured 2026-11-08/09 on one Windows 11 PC: Intel i7-14700KF (20 cores, 28 threads), 32 GB RAM, Microsoft Build of OpenJDK 21.0.10. All servers, proxies and load clients ran on this one machine over localhost.
 
-**Short version:** at any login rate a single game server can actually handle, all four setups log players in equally fast (about 76–80 ms median, nearly all of it Paper's own join work). The authentication itself costs a few microseconds in both plugins: under 0.01% of a login. NetworkLock rejects forged logins about 2.5× faster than BungeeGuard; BungeeGuard has no per-login work on the proxy. There is no speed reason to prefer either one.
+**Short version:** at any login rate a single game server can actually handle, all four setups log players in equally fast (about 76–80 ms median, nearly all of it Paper's own join work). The earlier 1.0.1 slowdown at 100 logins/s was traced to Paper's own join limit (5 per tick = 100/s) and hits 1.0.0 the same way (section 4). The authentication itself costs a few microseconds in both plugins: under 0.01% of a login. NetworkLock rejects forged logins about 2.5× faster than BungeeGuard; BungeeGuard has no per-login work on the proxy. There is no speed reason to prefer either one.
 
 ## 1. What was compared
 
@@ -12,6 +12,8 @@ Measured 2026-11-08/09 on one Windows 11 PC: Intel i7-14700KF (20 cores, 28 thre
 | bungeeguard | BungeeGuard 1.4.0 (release jar), static 64-character token | Velocity's built-in BungeeGuard support | `bungeeguard` |
 | nl100 | NetworkLock 1.0.0 | NetworkLock 1.0.0 | `legacy` |
 | nl101 | NetworkLock 1.0.1 | NetworkLock 1.0.1 | `legacy` |
+
+Builds: sections 2 and 3 measured the first 1.0.1 build (`6f6daa7`). The final 1.0.1 build adds the second-pass fixes, including two on the login path (the per-thread crypto cache now holds plain JDK objects, still signing the same bytes, and an "already connected" check on the proxy); it was measured against `6f6daa7` and 1.0.0 in the section 4 A/B runs (same speed within noise) and ran the multi-hour soak test in [TEST-REPORT.md](TEST-REPORT.md).
 
 The baseline is **not secure**: it shows the cost of Paper + Velocity alone. Each plugin was set up the way its own documentation says. Same Paper 1.21.11 build 132 (1 GB heap), Velocity 3.5.1 build 615 (512 MB), same JVM flags, same flat pre-generated world, same workloads. NetworkLock's update check and statistics were off (no network calls during the run); its per-IP login limiter stayed on with a limit high enough for one-IP load testing, so its bookkeeping is still measured.
 
@@ -25,9 +27,10 @@ JMH 1.37, 3 forks × 10 one-second measurements after 5 warm-up seconds, 2 GB he
 | Server: reject a forged login | 3,045 – 3,401 ns | 1,634 ± 44 ns | **1,218 ± 33 ns** |
 | Server: accept a valid login | 4,424 – 4,864 ns | 4,916 – 6,439 ns | 5,965 – 6,214 ns |
 
-- 1.0.1 creates credentials 17% faster and rejects forged ones 25% faster than 1.0.0 (per-thread reuse of the `Mac` and `MessageDigest`; the bytes signed are proven identical by a unit test).
+- The first 1.0.1 build created credentials 17% faster and rejected forged ones 25% faster than 1.0.0 (the final build is about 1% slower than that, see below) (per-thread reuse of the `Mac` and `MessageDigest`; the bytes signed are proven identical by a unit test).
 - **Valid-login verify is equal between 1.0.0 and 1.0.1.** The first run showed 4,916 vs 5,951 ns; a re-run with 6 forks per build, alternated (1.0.0, 1.0.1, 1.0.0, 1.0.1), gave 6,439 / 6,081 ns for 1.0.0 and 6,214 / 5,965 ns for 1.0.1. This benchmark is memory-bound (it walks a ~100 MB token pool and a replay map that grows to ~200,000 entries per second) and moves by about 1 µs between sessions, so only same-session alternated runs are compared. The stack profiler found no 1.0.1 code in the difference; the visible hotspot is the replay-cache cleanup, identical in both versions and only significant at the ~200,000 logins/s this benchmark produces.
 - BungeeGuard's ranges are its three runs (one per NetworkLock build); its code was identical each time.
+- **Final 1.0.1 build vs the first 1.0.1 build (`6f6daa7`)**, same session, alternated final / first / final / first, 3 forks each: create 1,250 and 1,245 vs 1,232 and 1,233 ns (+1.2%); reject forged 1,063 and 1,072 vs 1,060 and 1,056 ns (+0.8%); accept valid 3,885 and 3,869 vs 4,215 and 4,075 ns (within noise). The second-pass fixes cost 10–15 ns per signature (the per-thread crypto cache now holds plain JDK objects so plugin reloads cannot leak the classloader) and nothing measurable on the accept path.
 - Allocation per operation is not reported: the JMH GC profiler counted the per-iteration token-pool setup into it (even BungeeGuard's unchanged code read 26–38 KB/op), so those figures are invalid.
 
 ## 3. End to end: real logins through Velocity into Paper
@@ -65,7 +68,7 @@ The single missing real login in three setups was a Windows "address already in 
 
 Every failed valid login in the whole run (outside the saturation rows below) was checked by its recorded reason: all are Windows port exhaustion (`BindException`, or Velocity "Unable to connect you to lobby" for the same cause) or, in the reconnect storm, Velocity's own "already connected" check for a reused name. **Neither plugin refused a single valid login**, and NetworkLock never accepted a signature twice.
 
-### Where the test machine ran out
+### Where a single server stops keeping up
 
 | Workload | What happened (all four setups alike) |
 |---|---|
@@ -73,28 +76,46 @@ Every failed valid login in the whole run (outside the saturation rows below) wa
 | 500 logins/s | ~10,400–11,000 of 15,000 accepted, the rest timed out or failed, median ~5,100 ms |
 | Bursts of 200 and 500 at once | 10–60% of logins fail in every setup, including the baseline |
 
-The baseline, with no plugin at all, breaks at exactly the same point. One Paper server, Velocity and up to 512 load-client threads share one PC, and Paper joins players on its main thread. These rows measure the machine, not the plugins, and are not used to rank anything. A 200-player network sees a few logins per second at peak, far below this.
+The baseline, with no plugin at all, breaks at exactly the same point. Section 4 shows why: Paper admits at most `max-joins-per-tick` (default 5) new players per tick, which is 100 per second; above that the join queue only grows. With that limit raised, 250 logins/s ran at a 77–83 ms median in both NetworkLock versions. What remains then is the test PC running out of local TCP ports (Windows keeps closed connections in TIME_WAIT; every login uses two connections). These rows measure Paper's default and the PC, not the plugins, and are not used to rank anything. A 200-player network sees a few logins per second at peak.
 
 ### CPU and GC
 
 CPU time of the Paper and Velocity processes was read before and after every workload. Per login it is 7–15 ms of Paper CPU at 25–100 logins/s in every setup, mostly world join work; the differences between setups are within the run-to-run spread (for example rate50 Paper CPU per repetition: BungeeGuard 4.1–5.8 s, NL 1.0.0 4.5–5.5 s, NL 1.0.1 4.4–8.4 s). Paper ran about 6 young-generation GCs per workload in every setup (baseline 6.3, BungeeGuard 6.0, NL 1.0.0 5.9, NL 1.0.1 6.0). GC pause time was not captured: `jstat` printed decimal commas on this Windows locale and the script read them as zero (fixed in the script for future runs).
 
-## 4. The 1.0.1 CPU and 100 logins/s question
+## 4. The 100 logins/s anomaly: cause found (Paper's join limit, not NetworkLock)
 
-In the main run, 1.0.1's CPU per login and its median at 100 logins/s looked higher than 1.0.0's. Most of the CPU difference came from one run (repetition 2), which started seconds after the previous servers were force-stopped; it was high on every workload, including ones where 1.0.1 was lowest in the other repetitions. To check, a separate clean A/B run alternated 1.0.0 and 1.0.1 three times each on an idle machine:
+**Symptom.** In the main run, 1.0.1's median at 100 logins/s was 109 ms against 99 ms for 1.0.0, and in the first clean A/B 1.0.1 was higher in 4 of 6 runs. Taken alone, that looked like a 1.0.1 regression.
 
-Order nl100, nl101, nl101, nl100, nl100, nl101; fresh servers each time; GC time captured correctly this time.
+**What was ruled out.**
 
-| Workload | Median ms, NL 1.0.0 (3 runs) | Median ms, NL 1.0.1 (3 runs) | Paper CPU per login, 1.0.0 / 1.0.1 | Paper GC ms, 1.0.0 / 1.0.1 |
-|---|---|---|---|---|
-| 50 logins/s | 79.5, 79.5, 79.7 | 79.5, 79.4, 79.5 | 20.5 / 18.7 ms | 22 / 11 |
-| 100 logins/s | 94.4, 94.4, 94.6 | 125.2, 94.3, 92.9 | 12.5 / 12.2 ms | 31 / 35 |
-| Reconnect storm | 79.4, 79.5, 79.7 | 80.2, 79.6, 79.7 | 14.7 / 11.6 ms | 22 / 8 |
-| Mixed (with attack) | 79.5, 79.6, 79.3 | 79.2, 79.8, 79.8 | 17.4 / 16.7 ms | 20 / 12 |
+- *NetworkLock code on the login path:* thread dumps of Paper and Velocity taken every 2 s under 100 logins/s never showed a NetworkLock frame. The JMH verify cost is equal between the versions (section 2).
+- *CPU and GC:* across all A/B runs, 1.0.1 used the same or less CPU per login than 1.0.0 (for example 5.7 vs 6.5 ms Paper and 3.6 vs 4.3 ms Velocity at 100/s) and the same or less GC time.
+- *The new Velocity `PostLoginEvent` listener (staff update notices):* a test build with only that listener removed (7 instead of 8 annotated handlers, verified in the bytecode) behaved like normal 1.0.1 (89.0, 97.4, 88.2 ms).
+- *Running NetworkLock's Velocity handlers inline (`async = false`):* tried as an optimization, measured against the published 1.0.1 and 1.0.0 in a 12-run A/B, no gain (new build 95.3 ± 6.7 ms, 1.0.0 95.6 ± 9.6 ms at 100/s; at 50/s the 2–3 ms differences changed direction between experiments). Reverted.
+- *Paper's main thread:* sampling Paper's tick time (`mspt`) during the runs showed 5–9 ms average ticks at 100 logins/s, far below the 50 ms budget.
 
-Result: **no CPU or GC regression** — 1.0.1 used the same or less CPU per login and less GC time on every workload. At 50 logins/s and below the two are identical.
+**Every 100 logins/s run, all experiments** (median ms, fresh servers each run, builds alternated):
 
-**Open point, reported as found:** at 100 logins/s, 1.0.1's median was higher than 1.0.0's in 4 of the 6 runs across both experiments (mean 106.7 vs 96.6 ms; the other 2 runs were equal or lower). CPU and GC are not higher in those runs, and thread dumps taken under 100 logins/s never showed NetworkLock code on any Paper or Velocity thread, so the cause was not found. 100 logins/s on one game server is close to where this machine saturates (250/s breaks every setup), which makes latency there sensitive to small timing shifts. It does not affect realistic networks: a 200-player network peaks at a few logins per second, where every setup measures the same.
+| Experiment | NL 1.0.0 | NL 1.0.1 |
+|---|---|---|
+| Clean A/B, 30 s runs | 93.2, **110.9**, 89.9 | 89.9, 89.4, 87.6 |
+| 12-run A/B (published 1.0.1 vs new build vs 1.0.0) | 97.0, 89.3, **108.7**, 87.3 | 98.6, 92.4, 87.6, 102.7 (new build); 102.4, 95.2, 91.7, 93.9 (published) |
+| Tick-time sampling | 88.7, 97.5, 89.8, 88.9 | 87.9, 91.6, **124.7**, 93.5 |
+
+The slow runs (100–125 ms) hit both versions, randomly.
+
+**Cause.** Paper's `paper-global.yml` has `misc.max-joins-per-tick: 5`: at most 5 new players are let into the world per tick, which is exactly 100 per second at 20 ticks per second. A queue fed at exactly its service rate is unstable: whenever arrivals bunch up, logins wait one or more extra ticks, and how often that happens differs from run to run. Above 100 per second the queue only grows, which is the ~5,100 ms wall at 250 and 500 logins/s in section 3.
+
+**Proof.** The same A/B with `max-joins-per-tick: 1000` for both builds (3 runs each, alternated):
+
+| Median ms | NL 1.0.0 | NL 1.0.1 |
+|---|---|---|
+| 100 logins/s | 77.5, 80.5, 75.7 | 76.2, 78.8, 80.3 |
+| 250 logins/s | 76.8, 79.0, 79.1 | 78.7, 82.9, 79.2 |
+
+The slow mode is gone for both, and 250/s no longer collapses. The failed logins in that run are all Windows port exhaustion (`BindException`, or Velocity unable to open its connection to Paper for the same reason); none is a refusal by NetworkLock.
+
+**Conclusion.** The 100 logins/s difference was not caused by NetworkLock and is not a 1.0.1 regression; nothing in NetworkLock was changed for it. For server owners: a single Paper server admits at most 100 new players per second by default, whatever plugins it runs.
 
 ## 5. Problems found in the benchmark itself (and fixed before measuring)
 

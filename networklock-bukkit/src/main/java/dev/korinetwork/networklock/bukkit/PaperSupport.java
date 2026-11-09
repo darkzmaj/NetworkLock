@@ -31,10 +31,18 @@ final class PaperSupport {
         }
     }
 
+    /**
+     * Whether the server is shutting down. Paper has {@code Server#isStopping}; on Spigot the shutdown
+     * is recognised by CraftBukkit's own {@code disablePlugins} being on the stack (a plugin manager
+     * disabling NetworkLock alone calls {@code PluginManager#disablePlugin} instead).
+     */
     static boolean isStopping(Server server) {
         try {
             return (boolean) Server.class.getMethod("isStopping").invoke(server);
-        } catch (ReflectiveOperationException e) {
+        } catch (ReflectiveOperationException | RuntimeException e) {
+            for (StackTraceElement f : new Throwable().getStackTrace()) {
+                if (f.getClassName().endsWith(".CraftServer") && f.getMethodName().equals("disablePlugins")) return true;
+            }
             return false;
         }
     }

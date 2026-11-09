@@ -101,6 +101,19 @@ public final class Probe {
         }
     }
 
+    /** -Djoin=true: stay connected long enough for the server to place the player and fire its join event. */
+    static final boolean JOIN = Boolean.getBoolean("join");
+
+    static String joined(Socket s, String result) {
+        if (!JOIN) return result;
+        try {
+            Thread.sleep(Long.getLong("joinms", 2_000)); // -Djoinms: how long to stay
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+        return result + (s.isClosed() ? "" : " +joined");
+    }
+
     static String login(String host, int port, int protocol, String name, String handshakeHost, UUID uuid) throws IOException {
         try (Socket s = new Socket(host, port)) {
             s.setSoTimeout(15_000);
@@ -150,7 +163,7 @@ public final class Probe {
                         case 0x03 -> threshold = readVarInt(pin);
                         case 0x02 -> {
                             // before 1.20.2 there is no configuration phase: Login Success means the server let us in
-                            if (protocol < 764) return "ACCEPTED (login success)";
+                            if (protocol < 764) return joined(s, "ACCEPTED (login success)");
                             configuring = true;
                             acceptAfter = System.currentTimeMillis() + 6_000;
                             s.setSoTimeout(6_500);
@@ -172,8 +185,15 @@ public final class Probe {
                     boolean early = protocol < 766;
                     int disconnect = early ? 0x01 : 0x02, finish = early ? 0x02 : 0x03, keepAlive = early ? 0x03 : 0x04;
                     if (id == disconnect) return "REJECTED (configuration) " + printable(p);
-                    if (id == finish) return "ACCEPTED (backend reached finish-configuration)";
-                    if (!early && id == 0x0E) { // select known packs (1.20.5+): answer with none so the backend proceeds
+                    if (id == finish) {
+                        if (JOIN) {
+                            final int t = threshold;
+                            send(out, packet(finish, buf -> {}), t); // acknowledge: the server now places the player in the world
+                        }
+                        return joined(s, "ACCEPTED (backend reached finish-configuration)");
+                    }
+                    // select known packs (1.20.5+): answer with none so the backend proceeds; 26.x inserted a packet before it
+                    if (!early && id == (protocol >= 777 ? 0x0F : 0x0E)) {
                         final int t = threshold;
                         send(out, packet(0x07, buf -> varInt(buf, 0)), t);
                     }

@@ -48,7 +48,7 @@ On Sponge, use the `mods` folder and `config/networklock/config.yml`, and turn o
 | `/networklock status` | Shows if protection is active |
 | `/networklock reload` | Reloads the config (only if it's valid) |
 | `/networklock doctor` | Finds setup mistakes |
-| `/networklock stats` | Shows allowed and blocked logins |
+| `/networklock stats` | Shows allowed and blocked logins (and, on game servers, how full the replay memory is) |
 | `/networklock proxies` | Shows key fingerprints to compare proxy and server |
 | `/networklock about` | Shows the version and whether an update is available |
 

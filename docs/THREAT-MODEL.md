@@ -21,7 +21,7 @@ The game server checks, in this order:
 4. It is less than 30 seconds old.
 5. Its nonce has not been used before on this server.
 
-This happens before the player joins the world (`AsyncPlayerPreLoginEvent` on Paper 1.12.2+ and Folia, `PlayerLoginEvent` on Spigot and older Paper, `ServerSideConnectionEvent.Auth` on Sponge). If any check fails, the player is refused. On Paper, and on Spigot before 1.20.2, the signature is then removed from the player's profile. Sponge and newer Spigot don't allow that, so there the used signature stays in the profile, where it is worthless because it cannot be used again.
+This happens before the player joins the world (`AsyncPlayerPreLoginEvent` on Paper 1.12.2+ and Folia, `PlayerLoginEvent` on Spigot and older Paper, `ServerSideConnectionEvent.Auth` on Sponge). If any check fails, the player is refused. Afterwards the signature is removed from the player's profile, so other players never see it. Sponge and Spigot 1.21.9+ have read-only profiles; there NetworkLock swaps in a copy without it.
 
 Keys are 32 random bytes and never leave the config files. Only the signatures travel over the network. Each proxy has its own key.
 

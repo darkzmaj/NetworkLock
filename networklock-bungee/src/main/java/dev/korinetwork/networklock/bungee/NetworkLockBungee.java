@@ -6,6 +6,7 @@ import dev.korinetwork.networklock.core.ForwardingToken;
 import dev.korinetwork.networklock.core.JulLog;
 import dev.korinetwork.networklock.core.MiniText;
 import dev.korinetwork.networklock.core.PlayerIdentity;
+import dev.korinetwork.networklock.core.SecurityLog;
 import dev.korinetwork.networklock.core.ProxyCore;
 import dev.korinetwork.networklock.core.UpdateChecker;
 import dev.korinetwork.networklock.core.UsageStats;
@@ -31,6 +32,7 @@ import net.md_5.bungee.event.EventPriority;
 import java.net.InetSocketAddress;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 
 /** BungeeCord / Waterfall / FlameCord entry point, declared in {@code bungee.yml}. */
 public final class NetworkLockBungee extends Plugin implements Listener {
@@ -109,40 +111,68 @@ public final class NetworkLockBungee extends Plugin implements Listener {
     public void onServerConnect(ServerConnectEvent e) {
         if (e.isCancelled() || profiles == null) return;
         ProxiedPlayer player = e.getPlayer();
+        // BungeeCord drops a connect to the current server only after this event: sign nothing that will not be used
+        if (player.getServer() != null && player.getServer().getInfo().equals(e.getTarget())) return;
         try {
-            List<PlayerIdentity.Property> others = withoutToken(profiles.read(player.getPendingConnection()));
-            PlayerIdentity identity = new PlayerIdentity(player.getUniqueId(), player.getName(),
-                    Addresses.normalize(player.getSocketAddress()), others);
-            String token = core.mint(identity, e.getTarget().getName());
-            if (token == null) return;
-            List<PlayerIdentity.Property> signed = new ArrayList<>(others);
-            signed.add(new PlayerIdentity.Property(ForwardingToken.PROPERTY, token, ""));
-            profiles.write(player.getPendingConnection(), player.getUniqueId(), player.getName(), signed);
+            String token;
+            synchronized (player.getPendingConnection()) {
+                List<PlayerIdentity.Property> others = withoutToken(profiles.read(player.getPendingConnection()));
+                PlayerIdentity identity = new PlayerIdentity(player.getUniqueId(), player.getName(),
+                        Addresses.normalize(player.getSocketAddress()), others);
+                token = core.mint(identity, e.getTarget().getName());
+                if (token == null) return;
+                List<PlayerIdentity.Property> signed = new ArrayList<>(others);
+                signed.add(new PlayerIdentity.Property(ForwardingToken.PROPERTY, token, ""));
+                profiles.write(player.getPendingConnection(), player.getUniqueId(), player.getName(), signed);
+            }
+            // Safety net for connects that never happen (already connecting, cancelled later, server down): BungeeCord
+            // reads the profile as soon as the TCP connection opens, so after the connect timeout the credential is
+            // either sent or never will be. Only this exact credential is removed.
+            getProxy().getScheduler().schedule(this, () -> stripToken(player, token), connectTimeout(e) + 2000L, TimeUnit.MILLISECONDS);
         } catch (ReflectiveOperationException | RuntimeException ex) {
-            getLogger().severe("Could not sign the connection of " + player.getName() + " (backend will refuse it): " + ex);
+            getLogger().severe("Could not sign the connection of " + SecurityLog.clean(player.getName()) + " (backend will refuse it): " + ex);
+        }
+    }
+
+    private static long connectTimeout(ServerConnectEvent e) {
+        try {
+            return Math.max(1000, e.getRequest().getConnectTimeout());
+        } catch (LinkageError | RuntimeException old) {
+            return 5000; // BungeeCord's default on builds without ServerConnectRequest
         }
     }
 
     /** Drop the single-use credential once the backend accepted it, so nothing else relays it. */
     @EventHandler(priority = EventPriority.HIGHEST)
     public void onServerConnected(ServerConnectedEvent e) {
-        stripToken(e.getPlayer());
+        stripToken(e.getPlayer(), null);
     }
 
     @EventHandler(priority = EventPriority.HIGHEST)
     public void onKick(ServerKickEvent e) {
-        stripToken(e.getPlayer());
+        stripToken(e.getPlayer(), null);
         String reason = e.getReason() == null ? null : e.getReason().toPlainText();
         String replacement = core.translateBackendKick(reason);
         if (replacement != null) e.setReason(renderMini(replacement));
     }
 
-    private void stripToken(ProxiedPlayer player) {
+    /** Removes the credential; with {@code only} set, only if it is still exactly that one. */
+    private void stripToken(ProxiedPlayer player, String only) {
         if (profiles == null) return;
         try {
-            List<PlayerIdentity.Property> props = profiles.read(player.getPendingConnection());
-            List<PlayerIdentity.Property> kept = withoutToken(props);
-            if (kept.size() != props.size()) profiles.write(player.getPendingConnection(), player.getUniqueId(), player.getName(), kept);
+            synchronized (player.getPendingConnection()) {
+                List<PlayerIdentity.Property> props = profiles.read(player.getPendingConnection());
+                boolean present = false;
+                for (PlayerIdentity.Property p : props) {
+                    present |= ForwardingToken.PROPERTY.equals(p.name()) && (only == null || only.equals(p.value()));
+                }
+                if (present) {
+                    profiles.write(player.getPendingConnection(), player.getUniqueId(), player.getName(), withoutToken(props));
+                    if (only != null && core.debug()) {
+                        getLogger().info("Removed an unused signature from " + SecurityLog.clean(player.getName()) + " (that connection never happened)");
+                    }
+                }
+            }
         } catch (ReflectiveOperationException | RuntimeException ignored) {
             // the next connection overwrites the stale credential anyway; a replay of it is rejected
         }

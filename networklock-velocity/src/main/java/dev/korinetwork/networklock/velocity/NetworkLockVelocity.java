@@ -127,6 +127,8 @@ public final class NetworkLockVelocity {
         RegisteredServer target = e.getResult().getServer().orElse(null);
         if (target == null) return;
         Player player = e.getPlayer();
+        // a plugin may redirect to the server the player is already on; Velocity then connects nowhere
+        if (player.getCurrentServer().map(c -> c.getServer().equals(target)).orElse(false)) return;
         List<GameProfile.Property> others = withoutToken(player.getGameProfileProperties());
         List<PlayerIdentity.Property> props = new ArrayList<>(others.size());
         for (GameProfile.Property p : others) props.add(new PlayerIdentity.Property(p.getName(), p.getValue(), p.getSignature()));
@@ -190,7 +192,7 @@ public final class NetworkLockVelocity {
         List<String> out = new ArrayList<>(core.doctorLines());
         try {
             Matcher m = FORWARDING_MODE.matcher(Files.readString(Path.of("velocity.toml")));
-            String mode = m.find() ? m.group(1).toLowerCase() : "unknown";
+            String mode = m.find() ? m.group(1).toLowerCase(java.util.Locale.ROOT) : "unknown";
             switch (mode) {
                 case "modern" -> out.add("OK   forwarding mode: modern (Velocity's own HMAC forwarding stays active)");
                 case "legacy", "bungeeguard" -> out.add("OK   forwarding mode: " + mode
