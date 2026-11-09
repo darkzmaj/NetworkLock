@@ -42,7 +42,11 @@ Once a day NetworkLock tells kori.my that one more server runs it: an anonymous 
 - **Documentation:** https://kori.my/docs/networklock/
 - **Download:** [GitHub](https://github.com/darkzmaj/NetworkLock/releases/latest), [Modrinth](https://modrinth.com/plugin/networklock), [SpigotMC](https://www.spigotmc.org/resources/140207/)
 - **Source code:** https://github.com/darkzmaj/NetworkLock
-- **Support:** [Discord](https://kori.my/discord) and https://kori.my
+- **Support:** [Discord](https://darkzmaj.eu/discord) and https://kori.my
+
+[![Join our Discord: darkzmaj.eu/discord](https://kori.my/assets/img/brand/discord-banner.png)](https://darkzmaj.eu/discord)
+
+![© 2026 DarkZmaj · KORI Network](https://kori.my/assets/img/brand/copyright.png)
 
 Free and open source under the MIT licence. Made by DarkZmaj for KORI Network.
 
