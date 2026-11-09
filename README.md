@@ -24,12 +24,14 @@ Your proxy gives every player a one-time pass that only works for that player, o
 
 1. Put `NetworkLock.jar` in your proxy's `plugins` folder and start it once.
 2. Open the proxy's `plugins/NetworkLock/config.yml` (on Velocity: `plugins/networklock/config.yml`) and copy the `key`.
-3. Turn on player forwarding on the proxy (`modern` on Velocity, `ip_forward: true` on BungeeCord) and the matching setting on your game servers.
+3. Turn on player forwarding on the proxy and the matching setting on your game servers:
+   - **Velocity:** `modern` for Paper and its forks, `legacy` for Spigot and 1.8 servers.
+   - **BungeeCord / Waterfall:** `ip_forward: true`, and `settings.bungeecord: true` in each server's `spigot.yml`.
 4. Put `NetworkLock.jar` on each server, start it once, and fill in `plugins/NetworkLock/config.yml`:
 
 ```yaml
 network:
-  server-id: "lobby"        # the server's name in your proxy config
+  server-id: "lobby"        # exactly the server's name in your proxy config
 
 authentication:
   trusted-proxies:
